@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getDropById, getProductBySlug, getRelated } from "@/lib/queries";
+import { getAllProducts, getDropById, getProductBySlug, getRelated } from "@/lib/queries";
 import { ProductDetailView } from "@/components/product/product-detail-view";
+
+export function generateStaticParams() {
+  return getAllProducts().map((p) => ({ slug: p.slug }));
+}
 
 export async function generateMetadata({
   params,

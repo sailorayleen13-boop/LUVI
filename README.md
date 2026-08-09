@@ -34,3 +34,16 @@ src/
 ```
 
 Cuando se conecte Supabase, solo cambian las implementaciones dentro de `queries.ts`.
+
+## Deploy (preview en GitHub Pages)
+
+El repo incluye `.github/workflows/deploy-pages.yml`: en cada push a
+`claude/luvi-mobile-store-r5dm4w` construye un export estático
+(`GITHUB_PAGES=true npm run build`, ver `next.config.ts`) y lo publica en
+GitHub Pages. Requiere habilitarlo una vez en **Settings → Pages → Source:
+GitHub Actions** del repo. Después de eso queda en
+`https://sailorayleen13-boop.github.io/LUVI/`.
+
+`next dev` / `next build` / `next start` normales (sin `GITHUB_PAGES=true`)
+siguen siendo un build de servidor normal en la raíz — el export estático es
+solo para este preview y habrá que revisitarlo cuando se conecte Supabase.
