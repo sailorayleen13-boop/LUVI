@@ -1,23 +1,23 @@
 "use client";
 
 import Link from "next/link";
-import { Heart, Plus, Check } from "lucide-react";
+import { Check, Heart, Plus } from "lucide-react";
 import { useState } from "react";
 import type { Product } from "@/lib/types";
 import { formatCRC } from "@/lib/format";
-import { useCart } from "@/lib/store/cart-context";
 import { useWishlist } from "@/lib/store/wishlist-context";
 import { useToast } from "@/lib/store/toast-context";
+import { useProductActions } from "@/lib/product-actions";
 import { BadgePill } from "@/components/product/badge-pill";
+import { AvailabilityPill } from "@/components/product/availability-pill";
 import { ProductImage } from "@/components/product/product-image";
 
 export function ProductCard({ product }: { product: Product }) {
-  const { addItem } = useCart();
   const { isWishlisted, toggleWishlist } = useWishlist();
   const { showToast } = useToast();
+  const { presentation, trigger } = useProductActions(product);
   const [justAdded, setJustAdded] = useState(false);
 
-  const soldOut = product.badges.includes("sold-out") || product.stock <= 0;
   const wishlisted = isWishlisted(product.id);
 
   function handleWishlist(e: React.MouseEvent) {
@@ -32,9 +32,7 @@ export function ProductCard({ product }: { product: Product }) {
   function handleQuickAdd(e: React.MouseEvent) {
     e.preventDefault();
     e.stopPropagation();
-    if (soldOut) return;
-    addItem(product.id, 1);
-    showToast(`${product.name} — LUVI IT! 🛍️`);
+    trigger(1);
     setJustAdded(true);
     setTimeout(() => setJustAdded(false), 1200);
   }
@@ -50,16 +48,14 @@ export function ProductCard({ product }: { product: Product }) {
           emoji={product.images[0]}
           category={product.category}
           className="aspect-square w-full"
-          soldOut={soldOut}
+          faded={presentation.faded}
         />
 
-        <div className="absolute left-2 top-2 flex flex-col gap-1">
-          {product.badges
-            .filter((b) => b !== "sold-out" || soldOut)
-            .slice(0, 2)
-            .map((badge) => (
-              <BadgePill key={badge} type={badge} />
-            ))}
+        <div className="absolute left-2 top-2 flex flex-col items-start gap-1">
+          <AvailabilityPill presentation={presentation} />
+          {product.badges.slice(0, presentation.showPill ? 1 : 2).map((badge) => (
+            <BadgePill key={badge} type={badge} />
+          ))}
         </div>
 
         <button
@@ -79,11 +75,11 @@ export function ProductCard({ product }: { product: Product }) {
           />
         </button>
 
-        {!soldOut && (
+        {presentation.showQuickAdd && (
           <button
             type="button"
             onClick={handleQuickAdd}
-            aria-label="Agregar rápido al carrito"
+            aria-label={presentation.ctaLabel}
             className="absolute bottom-2 right-2 flex h-9 w-9 items-center justify-center rounded-full bg-fucsia text-white shadow-md active:scale-90"
           >
             {justAdded ? (
@@ -109,9 +105,9 @@ export function ProductCard({ product }: { product: Product }) {
             </span>
           )}
         </div>
-        {!soldOut && product.stock <= 3 && (
+        {presentation.cardMicroCopy && (
           <p className="text-xs font-medium text-fucsia-dark">
-            Solo quedan {product.stock} 👀
+            {presentation.cardMicroCopy}
           </p>
         )}
       </div>

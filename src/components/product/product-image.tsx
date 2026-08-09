@@ -9,12 +9,13 @@ export function ProductImage({
   emoji,
   category,
   className = "",
-  soldOut = false,
+  faded = false,
 }: {
   emoji: string;
   category: Category;
   className?: string;
-  soldOut?: boolean;
+  /** Dims the image for genuinely unavailable states (SOLD_OUT / SOLD_OUT_PREORDER). */
+  faded?: boolean;
 }) {
   const { gradient } = CATEGORY_STYLE[category];
 
@@ -24,12 +25,12 @@ export function ProductImage({
     >
       <span
         className="select-none text-5xl leading-none"
-        style={{ filter: soldOut ? "grayscale(1)" : undefined }}
+        style={{ filter: faded ? "grayscale(1)" : undefined }}
         aria-hidden
       >
         {emoji}
       </span>
-      {soldOut && <div className="absolute inset-0 bg-white/50" />}
+      {faded && <div className="absolute inset-0 bg-white/50" />}
     </div>
   );
 }

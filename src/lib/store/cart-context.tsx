@@ -3,51 +3,68 @@
 import { createContext, useContext, useMemo } from "react";
 import { useLocalStorageState } from "@/lib/store/use-local-storage";
 
+export type FulfillmentType = "in_stock" | "preorder";
+
 export interface CartLine {
   productId: string;
   quantity: number;
+  fulfillmentType: FulfillmentType;
 }
 
 interface CartContextValue {
   lines: CartLine[];
   itemCount: number;
-  addItem: (productId: string, quantity?: number) => void;
-  setQuantity: (productId: string, quantity: number) => void;
-  removeItem: (productId: string) => void;
+  addItem: (productId: string, quantity?: number, fulfillmentType?: FulfillmentType) => void;
+  setQuantity: (productId: string, fulfillmentType: FulfillmentType, quantity: number) => void;
+  removeItem: (productId: string, fulfillmentType: FulfillmentType) => void;
   clearCart: () => void;
 }
 
 const CartContext = createContext<CartContextValue | null>(null);
 
+function sameLine(a: CartLine, productId: string, fulfillmentType: FulfillmentType) {
+  return a.productId === productId && a.fulfillmentType === fulfillmentType;
+}
+
 export function CartProvider({ children }: { children: React.ReactNode }) {
   const [lines, setLines] = useLocalStorageState<CartLine[]>("luvi:cart", []);
 
   const value = useMemo<CartContextValue>(() => {
-    const addItem: CartContextValue["addItem"] = (productId, quantity = 1) => {
+    const addItem: CartContextValue["addItem"] = (
+      productId,
+      quantity = 1,
+      fulfillmentType = "in_stock",
+    ) => {
       setLines((current) => {
-        const existing = current.find((l) => l.productId === productId);
+        const existing = current.find((l) => sameLine(l, productId, fulfillmentType));
         if (existing) {
           return current.map((l) =>
-            l.productId === productId
+            sameLine(l, productId, fulfillmentType)
               ? { ...l, quantity: l.quantity + quantity }
               : l,
           );
         }
-        return [...current, { productId, quantity }];
+        return [...current, { productId, quantity, fulfillmentType }];
       });
     };
 
-    const setQuantity: CartContextValue["setQuantity"] = (productId, quantity) => {
+    const setQuantity: CartContextValue["setQuantity"] = (
+      productId,
+      fulfillmentType,
+      quantity,
+    ) => {
       setLines((current) => {
-        if (quantity <= 0) return current.filter((l) => l.productId !== productId);
+        if (quantity <= 0) {
+          return current.filter((l) => !sameLine(l, productId, fulfillmentType));
+        }
         return current.map((l) =>
-          l.productId === productId ? { ...l, quantity } : l,
+          sameLine(l, productId, fulfillmentType) ? { ...l, quantity } : l,
         );
       });
     };
 
-    const removeItem: CartContextValue["removeItem"] = (productId) => {
-      setLines((current) => current.filter((l) => l.productId !== productId));
+    const removeItem: CartContextValue["removeItem"] = (productId, fulfillmentType) => {
+      setLines((current) => current.filter((l) => !sameLine(l, productId, fulfillmentType)));
     };
 
     const clearCart = () => setLines([]);
