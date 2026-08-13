@@ -143,6 +143,14 @@ export interface InternalProduct extends Product {
    * internal so a future real score can't be confused with merchant input.
    */
   seedPopularity: number;
+  /**
+   * Deterministic mock seed for "Los más LUVI'd" ordering only — same
+   * caveat as seedPopularity. Stands in for a future real save/love-based
+   * signal (e.g. aggregated "save" ProductInteraction events), kept as a
+   * separate field so Trending and Most LUVI'd can actually differ in mock
+   * mode instead of both reading the same number.
+   */
+  seedLuviCount: number;
 }
 
 // ---------------------------------------------------------------------------

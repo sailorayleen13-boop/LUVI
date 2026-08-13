@@ -134,6 +134,19 @@ export function getTrending(limit = 8): Product[] {
     .slice(0, limit);
 }
 
+/**
+ * Mock-mode "Los más LUVI'd": ranks by the internal seedLuviCount seed —
+ * a deliberately different signal from getTrending()'s seedPopularity, so
+ * the two sections don't just show the same products in the same order.
+ * Same caveat: replace with real aggregated "save" events once they exist.
+ */
+export function getMostLuvid(limit = 8): Product[] {
+  const bySeed = new Map(internalProducts.map((p) => [p.id, p.seedLuviCount]));
+  return [...products]
+    .sort((a, b) => (bySeed.get(b.id) ?? 0) - (bySeed.get(a.id) ?? 0))
+    .slice(0, limit);
+}
+
 export function getNewArrivals(limit = 8): Product[] {
   return [...products]
     .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())

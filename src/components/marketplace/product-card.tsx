@@ -75,10 +75,13 @@ export function ProductCard({ product, merchant }: { product: Product; merchant:
 
       <div className="mt-2 space-y-0.5">
         <p className="line-clamp-1 text-[13.5px] font-medium text-charcoal">{product.name}</p>
-        <p className="line-clamp-1 text-[11.5px] text-charcoal-faint">{merchant.name}</p>
         <span className="font-display text-[15px] font-semibold text-charcoal">
           {formatCurrency(product.price, product.currency)}
         </span>
+        <p className="line-clamp-1 text-[11px] text-charcoal-faint">
+          {merchant.name}
+          {merchant.location.city ? ` · ${merchant.location.city}` : ""}
+        </p>
       </div>
     </Link>
   );

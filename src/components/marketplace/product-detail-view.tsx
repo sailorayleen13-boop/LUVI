@@ -14,9 +14,7 @@ import { ProductImage } from "@/components/marketplace/product-image";
 import { AvailabilityBadge } from "@/components/marketplace/availability-badge";
 import { BadgePill } from "@/components/marketplace/badge-pill";
 import { MerchantBlock } from "@/components/marketplace/merchant-block";
-import { ProductCard } from "@/components/marketplace/product-card";
-import { HorizontalScroller } from "@/components/home/horizontal-scroller";
-import { SectionHeader } from "@/components/home/section-header";
+import { DiscoverySection } from "@/components/marketplace/discovery-section";
 
 export function ProductDetailView({
   product,
@@ -100,22 +98,11 @@ export function ProductDetailView({
           <p className="text-[14px] leading-relaxed text-charcoal-soft">{product.description}</p>
         </div>
 
-        {related.length > 0 && (
-          <section className="flex flex-col gap-3">
-            <SectionHeader title={t.product.relatedHeading} />
-            <HorizontalScroller>
-              {related.map((relatedProduct) => {
-                const relatedMerchant = relatedMerchants[relatedProduct.merchantId];
-                if (!relatedMerchant) return null;
-                return (
-                  <div key={relatedProduct.id} className="w-[42%] flex-none snap-start">
-                    <ProductCard product={relatedProduct} merchant={relatedMerchant} />
-                  </div>
-                );
-              })}
-            </HorizontalScroller>
-          </section>
-        )}
+        <DiscoverySection
+          title={t.product.relatedHeading}
+          products={related}
+          merchants={relatedMerchants}
+        />
       </main>
 
       <div

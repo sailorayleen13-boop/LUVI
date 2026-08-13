@@ -46,4 +46,15 @@ export const esCR = {
   common: {
     back: "Volver",
   },
+  country: {
+    CR: "Costa Rica",
+  },
+  discovery: {
+    tagline: "¿Qué vas a LUVI hoy?",
+    trending: "🔥 Tendencias cerca de vos",
+    newArrivals: "✨ Recién llegaron",
+    mostLuvid: "💗 Los más LUVI'd",
+    cuteFinds: "🎀 Hallazgos cute",
+    storesHeading: "🏪 Tiendas que vas a LUVI",
+  },
 } as const;

@@ -31,6 +31,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 1284,
+    seedLuviCount: 890,
   },
   {
     id: "p2",
@@ -54,6 +55,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 2031,
+    seedLuviCount: 1339,
   },
   {
     id: "p3",
@@ -75,6 +77,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 876,
+    seedLuviCount: 646,
   },
   {
     id: "p4",
@@ -96,6 +99,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 341,
+    seedLuviCount: 325,
   },
   {
     id: "p5",
@@ -117,6 +121,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 654,
+    seedLuviCount: 512,
   },
   {
     id: "p6",
@@ -139,6 +144,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 1502,
+    seedLuviCount: 1021,
   },
   {
     id: "p7",
@@ -163,6 +169,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 214,
+    seedLuviCount: 248,
   },
   {
     id: "p8",
@@ -184,6 +191,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 0,
+    seedLuviCount: 120,
   },
   {
     id: "p9",
@@ -206,6 +214,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 198,
+    seedLuviCount: 239,
   },
   {
     id: "p10",
@@ -227,6 +236,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 723,
+    seedLuviCount: 554,
   },
   {
     id: "p11",
@@ -249,6 +259,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 445,
+    seedLuviCount: 387,
   },
   {
     id: "p12",
@@ -270,6 +281,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 132,
+    seedLuviCount: 199,
   },
   {
     id: "p13",
@@ -291,6 +303,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 267,
+    seedLuviCount: 280,
   },
   {
     id: "p14",
@@ -313,6 +326,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 589,
+    seedLuviCount: 473,
   },
   {
     id: "p15",
@@ -334,6 +348,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 302,
+    seedLuviCount: 301,
   },
   // --- One product per previously-uncovered category (Phase 2 decision 1):
   // exists to stress-test the marketplace UI/search/filters across product
@@ -360,6 +375,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 410,
+    seedLuviCount: 366,
   },
   {
     id: "p17",
@@ -382,6 +398,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 388,
+    seedLuviCount: 353,
   },
   {
     id: "p18",
@@ -405,6 +422,7 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 156,
+    seedLuviCount: 214,
   },
   {
     id: "p19",
@@ -427,5 +445,6 @@ export const products: InternalProduct[] = [
     saveCount: 0,
     clickOutCount: 0,
     seedPopularity: 97,
+    seedLuviCount: 178,
   },
 ];

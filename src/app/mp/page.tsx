@@ -1,31 +1,60 @@
-import { getAllMerchants, getAllProducts } from "@/lib/marketplace/queries";
-import { ProductCard } from "@/components/marketplace/product-card";
+import {
+  getAllMerchants,
+  getByCategory,
+  getMostLuvid,
+  getNewArrivals,
+  getTrending,
+} from "@/lib/marketplace/queries";
+import { DEFAULT_DISCOVERY_LOCATION } from "@/lib/marketplace/region-config";
+import { t } from "@/lib/i18n";
+import { DiscoveryHeader } from "@/components/marketplace/discovery-header";
+import { DiscoverySection } from "@/components/marketplace/discovery-section";
+import { MerchantCard } from "@/components/marketplace/merchant-card";
+import { SectionHeader } from "@/components/home/section-header";
+import { HorizontalScroller } from "@/components/home/horizontal-scroller";
 
-// Temporary flat review surface for Phase 2 — not linked from nav. Lets us
-// see ProductCard across every category/availability state without having
-// rebuilt Home's discovery sections yet (that's Phase 3+).
+/**
+ * Marketplace discovery preview — not linked from nav yet (Phase 3).
+ * Moving toward the target hierarchy: wordmark + location signal, then
+ * Trending / New Arrivals / Most LUVI'd / a category spotlight / Stores.
+ * Not a full Home rebuild — Drops and category browsing beyond one
+ * spotlight section are deliberately left for a later phase.
+ */
 export default function MarketplacePreviewPage() {
-  const products = getAllProducts();
-  const merchants = new Map(getAllMerchants().map((m) => [m.id, m]));
+  const merchants = Object.fromEntries(getAllMerchants().map((m) => [m.id, m]));
+  const allMerchants = getAllMerchants();
 
   return (
-    <main className="flex flex-col gap-4 px-4 py-4">
-      <div>
-        <h1 className="font-display text-xl font-bold text-charcoal">
-          Marketplace preview (Phase 2)
-        </h1>
-        <p className="text-[12.5px] text-charcoal-faint">
-          {products.length} productos · {merchants.size} tiendas — no enlazado desde la navegación todavía.
-        </p>
-      </div>
+    <>
+      <DiscoveryHeader location={DEFAULT_DISCOVERY_LOCATION} />
 
-      <div className="grid grid-cols-2 gap-x-3 gap-y-5">
-        {products.map((product) => {
-          const merchant = merchants.get(product.merchantId);
-          if (!merchant) return null;
-          return <ProductCard key={product.id} product={product} merchant={merchant} />;
-        })}
-      </div>
-    </main>
+      <main className="flex flex-col gap-7 pb-8 pt-3">
+        <DiscoverySection title={t.discovery.trending} products={getTrending()} merchants={merchants} />
+        <DiscoverySection
+          title={t.discovery.newArrivals}
+          products={getNewArrivals()}
+          merchants={merchants}
+        />
+        <DiscoverySection
+          title={t.discovery.mostLuvid}
+          products={getMostLuvid()}
+          merchants={merchants}
+        />
+        <DiscoverySection
+          title={t.discovery.cuteFinds}
+          products={getByCategory("home")}
+          merchants={merchants}
+        />
+
+        <section className="flex flex-col gap-3">
+          <SectionHeader title={t.discovery.storesHeading} />
+          <HorizontalScroller>
+            {allMerchants.map((merchant) => (
+              <MerchantCard key={merchant.id} merchant={merchant} />
+            ))}
+          </HorizontalScroller>
+        </section>
+      </main>
+    </>
   );
 }

@@ -9,7 +9,14 @@ const CURRENCY_SYMBOLS: Record<CurrencyCode, string> = {
   CRC: "₡",
 };
 
-/** Formats an amount as "₡5,500" — comma grouping per LUVI's brand style, currency/locale parameterized. */
+/**
+ * Formats an amount as "₡3.800" — period thousands separator, matching
+ * everyday es-CR commercial convention (this differs from both the formal
+ * es-CR ICU locale data, which groups with a space, and the ecommerce
+ * MVP's earlier comma choice in src/lib/format.ts, which this
+ * intentionally does not touch).
+ */
 export function formatCurrency(amount: number, currency: CurrencyCode = DEFAULT_CURRENCY): string {
-  return `${CURRENCY_SYMBOLS[currency]}${groupFormatter.format(Math.round(amount))}`;
+  const grouped = groupFormatter.format(Math.round(amount)).replace(/,/g, ".");
+  return `${CURRENCY_SYMBOLS[currency]}${grouped}`;
 }
