@@ -2,7 +2,7 @@ name: Deploy LUVI to GitHub Pages
 
 on:
   push:
-    branches: ["claude/luvi-mobile-store-r5dm4w"]
+    branches: ["claude/luvi-mobile-store-r5dm4w", "claude/luvi-marketplace-mvp"]
   workflow_dispatch:
 
 permissions:
