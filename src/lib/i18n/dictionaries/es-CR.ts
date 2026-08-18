@@ -63,6 +63,29 @@ export const esCR = {
   },
   search: {
     label: "Buscar",
+    placeholder: "¿Qué estás buscando?",
+    supportingCopy: "Buscá productos, tiendas o algo que viste por ahí 👀",
+    storesHeading: "Tiendas",
+    productsHeading: "Productos",
+    emptySubtitle: "Probá con otra palabra o explorá las categorías.",
+    resultsCount: (count: number, query: string) =>
+      `${count} resultado${count === 1 ? "" : "s"} para "${query}"`,
+    emptyTitle: (query: string) => `No encontramos nada para "${query}"`,
+  },
+  filters: {
+    all: "Todas",
+    category: "Categoría",
+    availability: "Disponibilidad",
+    region: "Ubicación",
+    merchant: "Tienda",
+    noResultsTitle: "No hay productos con estos filtros",
+    noResultsSubtitle: "Probá quitando algún filtro.",
+    resultsCount: (count: number) => `${count} resultado${count === 1 ? "" : "s"}`,
+  },
+  drops: {
+    heading: "💫 LUVI Drops",
+    includesPrefix: "Incluye productos de",
+    merchantsSuffix: "tiendas",
   },
   saved: {
     heading: "Guardados",

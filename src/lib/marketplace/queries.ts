@@ -1,6 +1,8 @@
 import { merchants as internalMerchants } from "@/lib/marketplace/mock/merchants";
 import { products as internalProducts } from "@/lib/marketplace/mock/products";
 import { drops as allDrops } from "@/lib/marketplace/mock/drops";
+import { interactions as seedInteractions } from "@/lib/marketplace/mock/interactions";
+import { computeTrendingScores } from "@/lib/marketplace/trending";
 import type {
   Category,
   Drop,
@@ -122,15 +124,17 @@ export function searchProducts(query: string): Product[] {
 }
 
 /**
- * Mock-mode "Trending Near You": ranks by the internal seedPopularity seed.
- * NOT a real scoring algorithm — once real usage exists this should rank by
- * aggregated ProductInteraction events (views/saves/luvi_it_click,
- * recency-weighted, filtered by location) instead. See InternalProduct.seedPopularity.
+ * "Tendencias cerca de vos": ranks by computeTrendingScores() over a
+ * deterministic seed ProductInteraction list (mock/interactions.ts) —
+ * recency-weighted views/saves/clicks, not a bare popularity number. Once
+ * real usage exists, pass real aggregated events (local + eventually
+ * server-side) into the same computeTrendingScores() instead — this
+ * function's shape doesn't need to change.
  */
 export function getTrending(limit = 8): Product[] {
-  const bySeed = new Map(internalProducts.map((p) => [p.id, p.seedPopularity]));
+  const scores = computeTrendingScores(seedInteractions);
   return [...products]
-    .sort((a, b) => (bySeed.get(b.id) ?? 0) - (bySeed.get(a.id) ?? 0))
+    .sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0))
     .slice(0, limit);
 }
 

@@ -1,4 +1,5 @@
 import {
+  getAllDrops,
   getAllMerchants,
   getByCategory,
   getMostLuvid,
@@ -10,18 +11,20 @@ import { t } from "@/lib/i18n";
 import { DiscoveryHeader } from "@/components/marketplace/discovery-header";
 import { DiscoverySection } from "@/components/marketplace/discovery-section";
 import { MerchantCard } from "@/components/marketplace/merchant-card";
+import { DropCard } from "@/components/marketplace/drop-card";
 import { SectionHeader } from "@/components/home/section-header";
 import { HorizontalScroller } from "@/components/home/horizontal-scroller";
 
 /**
  * LUVI Home — the marketplace discovery experience (formerly the Phase 2
  * preview at /mp, now the primary entry point per Phase 3 decision A).
- * Trending / New Arrivals / Most LUVI'd / a category spotlight / Stores.
- * Drops and full category browsing live at /explore, not here.
+ * Trending / New Arrivals / Most LUVI'd / LUVI Drops / a category
+ * spotlight / Stores. Full category browsing + filters live at /explore.
  */
 export default function Home() {
   const merchants = Object.fromEntries(getAllMerchants().map((m) => [m.id, m]));
   const allMerchants = getAllMerchants();
+  const drops = getAllDrops();
 
   return (
     <>
@@ -39,6 +42,18 @@ export default function Home() {
           products={getMostLuvid()}
           merchants={merchants}
         />
+
+        {drops.length > 0 && (
+          <section className="flex flex-col gap-3">
+            <SectionHeader title={t.drops.heading} />
+            <HorizontalScroller>
+              {drops.map((drop) => (
+                <DropCard key={drop.id} drop={drop} />
+              ))}
+            </HorizontalScroller>
+          </section>
+        )}
+
         <DiscoverySection
           title={t.discovery.cuteFinds}
           products={getByCategory("home")}

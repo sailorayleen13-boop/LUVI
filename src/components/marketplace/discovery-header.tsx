@@ -14,9 +14,7 @@ function formatLocationLabel(location: Location): string {
  * MarketplaceHeader (back-button header used on detail sub-pages) — this is
  * the top of the discovery feed itself, same spot the ecommerce MVP's
  * logo+search+cart row used to live. No cart icon here (nothing to add to
- * a cart in the marketplace flow); the search icon routes to /explore for
- * now since /search doesn't exist yet — a primary nav element should never
- * point at a 404.
+ * a cart in the marketplace flow); the search icon routes to /search.
  */
 export function DiscoveryHeader({ location }: { location: Location }) {
   return (
@@ -29,7 +27,7 @@ export function DiscoveryHeader({ location }: { location: Location }) {
           <Heart size={13} className="-translate-y-1.5 fill-fucsia text-fucsia" />
         </div>
         <Link
-          href="/explore"
+          href="/search"
           aria-label={t.search.label}
           className="flex h-9 w-9 items-center justify-center rounded-full active:bg-charcoal/5"
         >
