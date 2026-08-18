@@ -2,7 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Fredoka, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
-import { BottomNav } from "@/components/layout/bottom-nav";
+import { BottomNav } from "@/components/marketplace/bottom-nav";
 
 const fredoka = Fredoka({
   variable: "--font-fredoka",
@@ -18,7 +18,7 @@ const jakarta = Plus_Jakarta_Sans({
 export const metadata: Metadata = {
   title: "LUVI — Lo compré. Lo amé.",
   description:
-    "Descubrí productos virales curados: squishies, pet finds, cute home y más. LUVI IT!",
+    "Descubrí productos virales de tiendas locales cerca de vos: squishies, mascotas, belleza y más. LUVI IT!",
 };
 
 export const viewport: Viewport = {

@@ -2,10 +2,6 @@
  * es-CR dictionary. Generic customer-facing UI copy only — brand language
  * (LUVI, LUVI IT!, LUVI DROP) lives in src/lib/brand.ts and is never routed
  * through here, so it can't accidentally get "translated" later.
- *
- * Scoped to what Phase 2 actually renders (product card/detail, merchant
- * block, wishlist, outbound-click feedback). Nav/search/home copy gets
- * added when those surfaces are built, not pre-filled speculatively.
  */
 export const esCR = {
   availability: {
@@ -17,13 +13,13 @@ export const esCR = {
   category: {
     squishies: "Squishies",
     collectibles: "Coleccionables",
-    pets: "Pet Finds",
-    beauty: "Beauty",
-    fashion: "Fashion",
-    home: "Cute Finds",
-    tech: "Tech & Desk",
+    pets: "Mascotas",
+    beauty: "Belleza",
+    fashion: "Moda",
+    home: "Hallazgos cute",
+    tech: "Tecnología",
     gifts: "Regalos",
-    viral: "Viral Finds",
+    viral: "Virales",
   },
   product: {
     deliveryEstimatePrefix: "Entrega estimada",
@@ -34,6 +30,7 @@ export const esCR = {
     viewStore: "Ver tienda",
     locationLabel: "Ubicación",
     productsHeading: "Productos de esta tienda",
+    productCountSuffix: "productos",
   },
   wishlist: {
     added: "Agregado a tu LUVI List 💕",
@@ -56,5 +53,35 @@ export const esCR = {
     mostLuvid: "💗 Los más LUVI'd",
     cuteFinds: "🎀 Hallazgos cute",
     storesHeading: "🏪 Tiendas que vas a LUVI",
+  },
+  nav: {
+    home: "Inicio",
+    explore: "Explorar",
+    saved: "Guardados",
+    stores: "Tiendas",
+    account: "Cuenta",
+  },
+  search: {
+    label: "Buscar",
+  },
+  saved: {
+    heading: "Guardados",
+    emptyTitle: "Tu LUVI List está vacía",
+    emptySubtitle: "Guardá los productos que más te gusten para encontrarlos rápido.",
+    emptyCta: "Ir a LUVI",
+  },
+  stores: {
+    heading: "Tiendas",
+    subtitle: "Descubrí las tiendas locales en LUVI.",
+  },
+  explore: {
+    heading: "Explorar",
+    subtitle: "Buscá por categoría lo que quieras LUVI.",
+  },
+  account: {
+    heading: "Cuenta",
+    comingSoonTitle: "Tu cuenta LUVI está en camino",
+    comingSoonSubtitle:
+      "Pronto vas a poder crear tu cuenta, guardar tus datos y ver tu actividad en LUVI.",
   },
 } as const;

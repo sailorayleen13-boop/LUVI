@@ -1,77 +1,58 @@
-import { Header } from "@/components/layout/header";
-import { DiscoverySection } from "@/components/home/discovery-section";
 import {
+  getAllMerchants,
   getByCategory,
-  getJustDropped,
   getMostLuvid,
   getNewArrivals,
   getTrending,
-} from "@/lib/queries";
+} from "@/lib/marketplace/queries";
+import { DEFAULT_DISCOVERY_LOCATION } from "@/lib/marketplace/region-config";
+import { t } from "@/lib/i18n";
+import { DiscoveryHeader } from "@/components/marketplace/discovery-header";
+import { DiscoverySection } from "@/components/marketplace/discovery-section";
+import { MerchantCard } from "@/components/marketplace/merchant-card";
+import { SectionHeader } from "@/components/home/section-header";
+import { HorizontalScroller } from "@/components/home/horizontal-scroller";
 
+/**
+ * LUVI Home — the marketplace discovery experience (formerly the Phase 2
+ * preview at /mp, now the primary entry point per Phase 3 decision A).
+ * Trending / New Arrivals / Most LUVI'd / a category spotlight / Stores.
+ * Drops and full category browsing live at /explore, not here.
+ */
 export default function Home() {
+  const merchants = Object.fromEntries(getAllMerchants().map((m) => [m.id, m]));
+  const allMerchants = getAllMerchants();
+
   return (
     <>
-      <Header />
+      <DiscoveryHeader location={DEFAULT_DISCOVERY_LOCATION} />
 
-      <main className="flex flex-col gap-7 pb-8 pt-1">
-        <div className="px-4">
-          <p className="text-[13px] font-medium text-charcoal-soft">
-            Buscá algo que vas a{" "}
-            <span className="font-display font-semibold text-fucsia-dark">
-              LUVI
-            </span>{" "}
-            hoy 💗
-          </p>
-        </div>
-
+      <main className="flex flex-col gap-7 pb-8 pt-3">
+        <DiscoverySection title={t.discovery.trending} products={getTrending()} merchants={merchants} />
         <DiscoverySection
-          title="Trending Now"
-          subtitle="Lo que todos están viendo en TikTok rn."
-          href="/trending"
-          products={getTrending()}
-        />
-
-        <DiscoverySection
-          title="Just Dropped"
-          subtitle="Recién llegó. Corré antes que se agote."
-          href="/trending"
-          products={getJustDropped()}
-        />
-
-        <DiscoverySection
-          title="Most LUVI'd"
-          subtitle="Los favoritos de la comunidad."
-          href="/trending"
-          products={getMostLuvid()}
-        />
-
-        <DiscoverySection
-          title="Squishies"
-          subtitle="La colección que nos hizo empezar."
-          href="/c/squishies"
-          products={getByCategory("squishies")}
-        />
-
-        <DiscoverySection
-          title="Pet Finds"
-          subtitle="Para consentir a tu mejor amigo."
-          href="/c/pets"
-          products={getByCategory("pets")}
-        />
-
-        <DiscoverySection
-          title="Cute Finds"
-          subtitle="Para tu cuarto, tu depa, tu vida."
-          href="/c/home"
-          products={getByCategory("home")}
-        />
-
-        <DiscoverySection
-          title="New Arrivals"
-          subtitle="Lo más nuevo en LUVI."
-          href="/trending"
+          title={t.discovery.newArrivals}
           products={getNewArrivals()}
+          merchants={merchants}
         />
+        <DiscoverySection
+          title={t.discovery.mostLuvid}
+          products={getMostLuvid()}
+          merchants={merchants}
+        />
+        <DiscoverySection
+          title={t.discovery.cuteFinds}
+          products={getByCategory("home")}
+          merchants={merchants}
+        />
+
+        <section className="flex flex-col gap-3">
+          <SectionHeader title={t.discovery.storesHeading} />
+          <HorizontalScroller>
+            {allMerchants.map((merchant) => (
+              <MerchantCard key={merchant.id} merchant={merchant} />
+            ))}
+          </HorizontalScroller>
+        </section>
       </main>
     </>
   );
