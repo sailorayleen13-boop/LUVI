@@ -32,7 +32,7 @@ export function MerchantDetailView({
           </span>
           <h1 className="font-display text-xl font-bold text-charcoal">{merchant.name}</h1>
           <p className="text-[12.5px] text-charcoal-faint">{location}</p>
-          <p className="max-w-xs text-[13.5px] leading-relaxed text-charcoal-soft">
+          <p className="max-w-xs text-[13.5px] leading-relaxed text-charcoal-soft lg:max-w-md">
             {merchant.description}
           </p>
 
@@ -79,7 +79,7 @@ export function MerchantDetailView({
           <h2 className="font-display text-[15px] font-semibold text-charcoal">
             {t.merchant.productsHeading}
           </h2>
-          <div className="grid grid-cols-2 gap-x-3 gap-y-5">
+          <div className="grid grid-cols-2 gap-x-3 gap-y-5 md:grid-cols-3 md:gap-x-4 md:gap-y-6 lg:grid-cols-4 lg:gap-x-5 xl:grid-cols-5">
             {products.map((product) => (
               <ProductCard key={product.id} product={product} merchant={merchant} />
             ))}

@@ -77,7 +77,7 @@ export default function SearchPage() {
         {results.products.length > 0 && (
           <section className="flex flex-col gap-3">
             <SectionHeader title={t.search.productsHeading} />
-            <div className="grid grid-cols-2 gap-x-3 gap-y-5">
+            <div className="grid grid-cols-2 gap-x-3 gap-y-5 md:grid-cols-3 md:gap-x-4 md:gap-y-6 lg:grid-cols-4 lg:gap-x-5 xl:grid-cols-5">
               {results.products.map((product) => {
                 const merchant = merchantsById[product.merchantId];
                 if (!merchant) return null;

@@ -49,7 +49,7 @@ export default function SavedPage() {
   return (
     <>
       <TabHeader title={t.saved.heading} />
-      <main className="grid grid-cols-2 gap-x-3 gap-y-5 px-4 pb-8">
+      <main className="grid grid-cols-2 gap-x-3 gap-y-5 px-4 pb-8 md:grid-cols-3 md:gap-x-4 md:gap-y-6 lg:grid-cols-4 lg:gap-x-5 xl:grid-cols-5">
         {saved.map(({ product, merchant }) => (
           <ProductCard key={product.id} product={product} merchant={merchant} />
         ))}
