@@ -28,7 +28,14 @@ export function DiscoverySection({
           const merchant = merchants[product.merchantId];
           if (!merchant) return null;
           return (
-            <div key={product.id} className="w-[42%] flex-none snap-start">
+            // Percentage width lets mobile peek the next card at any phone
+            // size; fixed widths take over from md up so cards stay a
+            // sane, hand-sized size instead of ballooning with the
+            // container (see Responsive UX pass — desktop/tablet layouts).
+            <div
+              key={product.id}
+              className="w-[42%] flex-none snap-start md:w-[200px] lg:w-[210px] xl:w-[224px]"
+            >
               <ProductCard product={product} merchant={merchant} />
             </div>
           );

@@ -26,7 +26,7 @@ export function BottomNav() {
   const { productIds } = useWishlist();
 
   return (
-    <nav className="sticky bottom-0 z-30 flex items-stretch justify-around border-t border-charcoal/8 bg-cream/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm">
+    <nav className="sticky bottom-0 z-30 flex items-stretch justify-around border-t border-charcoal/8 bg-cream/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-sm lg:hidden">
       {TABS.map(({ href, label, icon: Icon }) => {
         const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
         const badgeCount = href === "/saved" ? productIds.length : 0;
