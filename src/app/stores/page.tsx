@@ -10,7 +10,7 @@ export default function StoresPage() {
   return (
     <>
       <TabHeader title={t.stores.heading} subtitle={t.stores.subtitle} />
-      <main className="flex flex-col gap-3 px-4 pb-8">
+      <main className="grid grid-cols-1 gap-3 px-4 pb-8 md:grid-cols-2 md:gap-4 lg:grid-cols-3">
         {merchants.map((merchant) => (
           <MerchantDirectoryCard
             key={merchant.id}
