@@ -42,6 +42,8 @@ export const esCR = {
   },
   common: {
     back: "Volver",
+    previous: "Anterior",
+    next: "Siguiente",
   },
   country: {
     CR: "Costa Rica",
