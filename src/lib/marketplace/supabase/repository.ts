@@ -7,10 +7,11 @@ import type { Database } from "@/lib/supabase/types";
 /**
  * Supabase-backed implementation of the same conceptual API as
  * src/lib/marketplace/queries.ts (getAllMerchants, getProductBySlug,
- * getTrending, etc.) — written to validate the Phase 6 infrastructure
- * (schema + RLS + client separation) end to end, NOT wired into any page
- * yet. queries.ts stays mock-backed and is what the UI actually calls today
- * (see Phase 6 Step 6 / the completion report for why).
+ * getTrending, etc.) — as of Phase 7's catalog cutover this is the
+ * storefront's real data source, reached through the mock-fallback facade
+ * at src/lib/marketplace/catalog.ts (never called directly from a page).
+ * queries.ts/mock/* stay in the tree as that facade's dev/offline fallback
+ * and for isolated tests — no longer the production source of truth.
  *
  * Every function here does its own explicit column allowlisting on top of
  * RLS — same "allowlist, not destructure-and-omit" rule queries.ts's
@@ -170,6 +171,37 @@ export async function getMerchantBySlug(slug: string): Promise<Merchant | undefi
   return toMerchant(data, locations.get(data.id));
 }
 
+export async function getMerchantById(id: string): Promise<Merchant | undefined> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("merchants")
+    .select(MERCHANT_COLUMNS)
+    .eq("id", id)
+    .eq("status", "active")
+    .eq("moderation_status", "approved")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return undefined;
+  const locations = await loadPrimaryLocations(supabase, [data.id]);
+  return toMerchant(data, locations.get(data.id));
+}
+
+/** Batch id lookup for /saved (which resolves a set of saved product ids into merchants). */
+export async function getMerchantsByIds(ids: string[]): Promise<Merchant[]> {
+  if (ids.length === 0) return [];
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("merchants")
+    .select(MERCHANT_COLUMNS)
+    .in("id", ids)
+    .eq("status", "active")
+    .eq("moderation_status", "approved");
+  if (error) throw error;
+  const rows = data ?? [];
+  const locations = await loadPrimaryLocations(supabase, rows.map((r) => r.id));
+  return rows.map((r) => toMerchant(r, locations.get(r.id)));
+}
+
 // ---------------------------------------------------------------------------
 // Products
 // ---------------------------------------------------------------------------
@@ -208,6 +240,55 @@ export async function getProductBySlug(slug: string): Promise<Product | undefine
   return product;
 }
 
+export async function getProductById(id: string): Promise<Product | undefined> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("products")
+    .select(PRODUCT_COLUMNS)
+    .eq("id", id)
+    .eq("status", "active")
+    .eq("moderation_status", "approved")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return undefined;
+  const [product] = await hydrateProducts(supabase, [data]);
+  return product;
+}
+
+/** Batch id lookup — /saved resolves a set of saved product ids (local + server) this way. */
+export async function getProductsByIds(ids: string[]): Promise<Product[]> {
+  if (ids.length === 0) return [];
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("products")
+    .select(PRODUCT_COLUMNS)
+    .in("id", ids)
+    .eq("status", "active")
+    .eq("moderation_status", "approved");
+  if (error) throw error;
+  return hydrateProducts(supabase, data ?? []);
+}
+
+/**
+ * Batch slug -> id lookup, used only by legacy-id-migration.ts: the mock
+ * catalog's slugs match the real seeded catalog's slugs 1:1 (seed.sql was
+ * written to mirror mock/products.ts), so a stale localStorage id like "p1"
+ * resolves to its real UUID via this slug bridge rather than being sent to
+ * the database as-is.
+ */
+export async function getProductIdsBySlugs(slugs: string[]): Promise<Map<string, string>> {
+  if (slugs.length === 0) return new Map();
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, slug")
+    .in("slug", slugs)
+    .eq("status", "active")
+    .eq("moderation_status", "approved");
+  if (error) throw error;
+  return new Map((data ?? []).map((r) => [r.slug, r.id]));
+}
+
 export async function getProductsByMerchant(merchantId: string): Promise<Product[]> {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
@@ -230,6 +311,20 @@ export async function getByCategory(category: Category, limit?: number): Promise
     .eq("moderation_status", "approved");
   if (typeof limit === "number") query = query.limit(limit);
   const { data, error } = await query;
+  if (error) throw error;
+  return hydrateProducts(supabase, data ?? []);
+}
+
+export async function getRelated(product: Product, limit = 6): Promise<Product[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("products")
+    .select(PRODUCT_COLUMNS)
+    .eq("category", product.category)
+    .neq("id", product.id)
+    .eq("status", "active")
+    .eq("moderation_status", "approved")
+    .limit(limit);
   if (error) throw error;
   return hydrateProducts(supabase, data ?? []);
 }
@@ -275,7 +370,7 @@ export async function getNewArrivals(limit = 8): Promise<Product[]> {
  * exists to draw: ordinary per-user data goes through the anon/session
  * client; aggregate/cross-tenant reads go through here.
  */
-async function loadRecentInteractions(days = 30): Promise<ProductInteraction[]> {
+export async function getRecentInteractions(days = 30): Promise<ProductInteraction[]> {
   const admin = createSupabaseAdminClient();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await admin
@@ -297,7 +392,7 @@ async function loadRecentInteractions(days = 30): Promise<ProductInteraction[]> 
 }
 
 export async function getTrending(limit = 8): Promise<Product[]> {
-  const [products, events] = await Promise.all([getAllProducts(), loadRecentInteractions()]);
+  const [products, events] = await Promise.all([getAllProducts(), getRecentInteractions()]);
   const scores = computeTrendingScores(events);
   return [...products]
     .sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0))
@@ -305,7 +400,7 @@ export async function getTrending(limit = 8): Promise<Product[]> {
 }
 
 export async function getMostLuvid(limit = 8): Promise<Product[]> {
-  const [products, events] = await Promise.all([getAllProducts(), loadRecentInteractions()]);
+  const [products, events] = await Promise.all([getAllProducts(), getRecentInteractions()]);
   // Same event list as getTrending(), weighted toward "save" only, so mock
   // parity (Trending vs Most LUVI'd reading two different signals) carries
   // over once this is real data instead of the seedPopularity/seedLuviCount

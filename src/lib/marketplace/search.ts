@@ -1,4 +1,3 @@
-import { getAllMerchants, getAllProducts } from "@/lib/marketplace/queries";
 import type { Merchant, Product } from "@/lib/marketplace/types";
 import { t } from "@/lib/i18n";
 
@@ -17,18 +16,19 @@ export interface SearchResults {
 }
 
 /**
- * Mock-mode text search: normalized (accent-insensitive) substring matching
- * across product name/description/category and merchant name/city/region.
+ * Text search: normalized (accent-insensitive) substring matching across
+ * product name/description/category and merchant name/city/region.
  * Deliberately simple per Phase 4 scope — no embeddings, no external search
- * service. Callers only see search(query) -> SearchResults, so swapping
- * this for a real search backend later means replacing this function's
- * body, not the pages that call it.
+ * service. Takes the catalog to search as plain arguments (rather than
+ * reading a module-level catalog itself) so it stays a pure function
+ * regardless of whether the caller sourced products/merchants from
+ * Supabase (catalog.ts, the real production path since Phase 7's cutover)
+ * or from the mock catalog directly (tests, isolated fixtures).
  */
-export function search(rawQuery: string): SearchResults {
+export function search(rawQuery: string, products: Product[], merchants: Merchant[]): SearchResults {
   const query = normalize(rawQuery);
   if (!query) return { query: rawQuery, products: [], merchants: [] };
 
-  const merchants = getAllMerchants();
   const merchantById = new Map(merchants.map((m) => [m.id, m]));
 
   const matchedMerchants = merchants.filter((m) =>
@@ -37,7 +37,7 @@ export function search(rawQuery: string): SearchResults {
     ),
   );
 
-  const products = getAllProducts().filter((p) => {
+  const matchedProducts = products.filter((p) => {
     const merchant = merchantById.get(p.merchantId);
     const haystack = [
       p.name,
@@ -51,5 +51,5 @@ export function search(rawQuery: string): SearchResults {
     return haystack.some((field) => field && normalize(field).includes(query));
   });
 
-  return { query: rawQuery, products, merchants: matchedMerchants };
+  return { query: rawQuery, products: matchedProducts, merchants: matchedMerchants };
 }

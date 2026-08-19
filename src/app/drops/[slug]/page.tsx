@@ -1,18 +1,11 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import {
-  getAllDrops,
-  getAllMerchants,
-  getDropBySlug,
-  getProductsForDrop,
-} from "@/lib/marketplace/queries";
+import { getAllMerchants, getDropBySlug, getProductsForDrop } from "@/lib/marketplace/catalog";
 import { t } from "@/lib/i18n";
 import { MarketplaceHeader } from "@/components/marketplace/marketplace-header";
 import { ProductCard } from "@/components/marketplace/product-card";
 
-export function generateStaticParams() {
-  return getAllDrops().map((d) => ({ slug: d.slug }));
-}
+// No generateStaticParams — see the same note in app/m/[slug]/page.tsx.
 
 export async function generateMetadata({
   params,
@@ -20,7 +13,7 @@ export async function generateMetadata({
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-  const drop = getDropBySlug(slug);
+  const drop = await getDropBySlug(slug);
   if (!drop) return {};
   return { title: `${drop.name} — LUVI`, description: drop.description };
 }
@@ -37,11 +30,11 @@ export default async function DropDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const drop = getDropBySlug(slug);
+  const drop = await getDropBySlug(slug);
   if (!drop) notFound();
 
-  const products = getProductsForDrop(drop);
-  const merchantsById = Object.fromEntries(getAllMerchants().map((m) => [m.id, m]));
+  const [products, allMerchants] = await Promise.all([getProductsForDrop(drop), getAllMerchants()]);
+  const merchantsById = Object.fromEntries(allMerchants.map((m) => [m.id, m]));
   const merchantCount = new Set(products.map((p) => p.merchantId)).size;
 
   return (
