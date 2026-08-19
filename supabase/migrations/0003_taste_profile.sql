@@ -2,9 +2,17 @@
 --
 -- Reviewed 0001_schema.sql / 0002_rls.sql before writing this — the
 -- existing profiles/saved_products/product_interactions tables remain the
--- canonical shape. This migration only adds what's genuinely new, and
--- makes one deliberate compatibility fix (see "ID-space fix" below). It
--- never edits 0001/0002 themselves.
+-- canonical shape, UUID foreign keys included. This migration only adds
+-- what's genuinely new; it never edits 0001/0002 themselves, and does NOT
+-- touch saved_products.product_id or product_interactions.{product_id,
+-- merchant_id} — those stay `uuid references products(id)` / `references
+-- merchants(id)` exactly as 0001 defined them. An earlier draft of this
+-- migration weakened those to text to accommodate the mock catalog's
+-- non-UUID ids ("p1", "m1"); that direction was rejected on review — the
+-- schema is long-lived and the mock catalog is not, so Phase 7 instead
+-- cuts the storefront over to the real seeded Supabase catalog (see
+-- src/lib/marketplace/supabase/repository.ts and the completion report's
+-- "Catalog cutover" section) rather than loosening referential integrity.
 
 -- ---------------------------------------------------------------------------
 -- Auto-create a profile row on signup. This is the standard, recommended
@@ -141,36 +149,12 @@ $$;
 
 grant execute on function public.increment_taste_weight to authenticated;
 
--- ---------------------------------------------------------------------------
--- ID-space fix for saved_products / product_interactions.
---
--- 0001_schema.sql declared saved_products.product_id and
--- product_interactions.{product_id,merchant_id} as `uuid references
--- products(id)` / `references merchants(id)` — correct for a Supabase-native
--- catalog, but the storefront the user actually browses in Phase 7 is still
--- the mock catalog (src/lib/marketplace/mock/*.ts), whose ids are plain
--- strings like "p1" / "m1", not UUIDs and not rows in the `products` /
--- `merchants` tables Phase 6 seeded. Phase 7 needs Saved and interaction
--- events to be genuinely Supabase-backed NOW (per spec) without doing a
--- full catalog cutover NOW (explicitly deferred, see the completion
--- report's Section 13) — those two requirements are only reconcilable if
--- these id columns can hold whatever id the CURRENT catalog source uses.
---
--- So: drop the FK + narrow uuid type, use plain text instead. This is
--- forward-compatible — once a future phase migrates the catalog to
--- Supabase-native rows, their real UUIDs are still valid text and nothing
--- here needs to change again; only re-adding a FK would need another
--- migration at that point, once both sides are guaranteed to agree.
--- ---------------------------------------------------------------------------
-
-alter table saved_products drop constraint if exists saved_products_product_id_fkey;
-alter table saved_products alter column product_id type text using product_id::text;
-
-alter table product_interactions drop constraint if exists product_interactions_product_id_fkey;
-alter table product_interactions alter column product_id type text using product_id::text;
-
-alter table product_interactions drop constraint if exists product_interactions_merchant_id_fkey;
-alter table product_interactions alter column merchant_id type text using merchant_id::text;
-
--- RLS policies for both tables (0002_rls.sql) key off user_id/session_id
--- only, never product_id/merchant_id, so none of them need to change.
+-- No changes to saved_products or product_interactions in this migration —
+-- their uuid FKs to products(id)/merchants(id), as defined in
+-- 0001_schema.sql, are preserved exactly. The application layer (Server
+-- Actions in src/lib/marketplace/actions.ts and saved-products.ts) is
+-- responsible for only ever writing real product/merchant UUIDs into them
+-- now that the storefront reads the real Supabase catalog — see
+-- src/lib/marketplace/legacy-id-migration.ts for how a pre-cutover local
+-- save (an old mock id like "p1") is resolved to a real UUID or safely
+-- dropped, rather than sent to the database at all.

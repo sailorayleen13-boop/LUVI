@@ -1,9 +1,8 @@
 import "server-only";
 import { getCurrentUser } from "@/lib/auth/session";
 import { getTastePreferences } from "@/lib/marketplace/taste/queries";
-import { getAllProducts } from "@/lib/marketplace/queries";
+import { getAllProducts, getRecentInteractions } from "@/lib/marketplace/catalog";
 import { computeTrendingScores } from "@/lib/marketplace/trending";
-import { interactions as seedInteractions } from "@/lib/marketplace/mock/interactions";
 import { recommendProductsForUser } from "@/lib/marketplace/recommendations";
 import type { Product } from "@/lib/marketplace/types";
 
@@ -30,10 +29,11 @@ export async function getPersonalizedHomeSection(limit = 10): Promise<Personaliz
     const preferences = await getTastePreferences(user.id);
     if (preferences.length === 0) return EMPTY_RESULT;
 
-    const products = getAllProducts();
-    // Reuses computeTrendingScores() over the same seed events getTrending()
-    // already uses (queries.ts) — one trending computation, two consumers.
-    const trendingScores = computeTrendingScores(seedInteractions);
+    const [products, recentInteractions] = await Promise.all([getAllProducts(), getRecentInteractions()]);
+    // Reuses computeTrendingScores() over the same recent-interactions read
+    // getTrending() already uses (catalog.ts) — one trending computation,
+    // two consumers.
+    const trendingScores = computeTrendingScores(recentInteractions);
 
     const recommendations = recommendProductsForUser({
       products,

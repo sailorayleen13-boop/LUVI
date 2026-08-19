@@ -5,51 +5,42 @@ import Link from "next/link";
 import { Heart } from "lucide-react";
 import { useWishlist } from "@/lib/store/wishlist-context";
 import { useAuth } from "@/lib/store/auth-context";
-import { getMerchantById, getProductById } from "@/lib/marketplace/queries";
-import { getServerSavedProductIdsAction } from "@/lib/marketplace/actions";
+import { getSavedProductsAction } from "@/lib/marketplace/actions";
 import { t } from "@/lib/i18n";
 import { TabHeader } from "@/components/marketplace/tab-header";
 import { ProductCard } from "@/components/marketplace/product-card";
+import type { Merchant, Product } from "@/lib/marketplace/types";
 
 /**
  * Local wishlist ids (useWishlist) are always shown — that's still what
  * makes Saved work instantly and offline, anonymous or not (Decision 2).
- * When signed in, this ALSO fetches the server-side saved_products ids
- * (getServerSavedProductIdsAction) and unions them in, so a product saved
- * from a different device shows up here too — "authenticated Saved should
- * persist across devices" without needing /saved itself to become the
- * source of truth for local browsing.
+ * When signed in, this ALSO fetches the server-side saved_products ids and
+ * unions them in, so a product saved from a different device shows up
+ * here too. As of Phase 7's catalog cutover, resolving those ids to full
+ * Product/Merchant records happens server-side, in one call
+ * (getSavedProductsAction): it also routes local ids through the legacy
+ * mock-id migration (see legacy-id-migration.ts) so a pre-cutover local
+ * save (an old "p1"-style id) is safely resolved or dropped rather than
+ * ever reaching the database or crashing this page.
  */
 export default function SavedPage() {
   const { productIds: localIds } = useWishlist();
   const { user } = useAuth();
-  const [serverIds, setServerIds] = useState<string[]>([]);
+  const [saved, setSaved] = useState<Array<{ product: Product; merchant: Merchant }>>([]);
 
   useEffect(() => {
     let cancelled = false;
-    // Resolve to [] for an anonymous user too, so the reset on sign-out
-    // still happens inside a .then() callback rather than synchronously
-    // in the effect body.
-    const idsPromise = user ? getServerSavedProductIdsAction() : Promise.resolve([]);
-    idsPromise
-      .then((ids) => {
-        if (!cancelled) setServerIds(ids);
+    getSavedProductsAction(localIds)
+      .then((result) => {
+        if (!cancelled) setSaved(result);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setSaved([]);
+      });
     return () => {
       cancelled = true;
     };
-  }, [user]);
-
-  const productIds = Array.from(new Set([...localIds, ...serverIds]));
-
-  const saved = productIds.flatMap((id) => {
-    const product = getProductById(id);
-    if (!product) return [];
-    const merchant = getMerchantById(product.merchantId);
-    if (!merchant) return [];
-    return [{ product, merchant }];
-  });
+  }, [localIds, user]);
 
   if (saved.length === 0) {
     return (
