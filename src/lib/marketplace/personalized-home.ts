@@ -1,0 +1,48 @@
+import "server-only";
+import { getCurrentUser } from "@/lib/auth/session";
+import { getTastePreferences } from "@/lib/marketplace/taste/queries";
+import { getAllProducts } from "@/lib/marketplace/queries";
+import { computeTrendingScores } from "@/lib/marketplace/trending";
+import { interactions as seedInteractions } from "@/lib/marketplace/mock/interactions";
+import { recommendProductsForUser } from "@/lib/marketplace/recommendations";
+import type { Product } from "@/lib/marketplace/types";
+
+export interface PersonalizedHomeResult {
+  recommendations: Product[];
+}
+
+const EMPTY_RESULT: PersonalizedHomeResult = { recommendations: [] };
+
+/**
+ * Server-side wiring behind Home's "Para ti" section (src/app/page.tsx).
+ * Kept out of the page component itself so the fail-closed behavior lives
+ * in one obvious place: ANY failure here — no session, no Supabase row,
+ * a thrown error reading taste_preferences — resolves to an empty result,
+ * never a rejected promise. Home always falls back to the existing
+ * discovery sections when this comes back empty (cold-start included);
+ * personalization is additive, never a single point of failure.
+ */
+export async function getPersonalizedHomeSection(limit = 10): Promise<PersonalizedHomeResult> {
+  try {
+    const user = await getCurrentUser();
+    if (!user) return EMPTY_RESULT;
+
+    const preferences = await getTastePreferences(user.id);
+    if (preferences.length === 0) return EMPTY_RESULT;
+
+    const products = getAllProducts();
+    // Reuses computeTrendingScores() over the same seed events getTrending()
+    // already uses (queries.ts) — one trending computation, two consumers.
+    const trendingScores = computeTrendingScores(seedInteractions);
+
+    const recommendations = recommendProductsForUser({
+      products,
+      tastePreferences: preferences,
+      trendingScores,
+      limit,
+    });
+    return { recommendations };
+  } catch {
+    return EMPTY_RESULT;
+  }
+}

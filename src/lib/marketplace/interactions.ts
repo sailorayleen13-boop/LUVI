@@ -1,20 +1,34 @@
 import type { ProductInteraction } from "@/lib/marketplace/types";
+import { recordAuthenticatedInteractionAction } from "@/lib/marketplace/actions";
 
 /**
- * Mock-mode interaction tracking. Nothing in the app calls track() yet —
- * this module exists so Phase 2 UI work has a stable function to call, and
- * so the eventual swap to Supabase is "replace this file's internals with
- * an insert," not "invent the event shape while also wiring up UI."
- *
- * In mock mode, events are kept in memory (module-level array) and
- * mirrored to localStorage when available, so they survive a page reload
- * during local testing without needing a backend.
+ * Interaction tracking — still the single event-tracking API the whole app
+ * calls (Phase 7 explicitly avoids a second analytics system). Local/
+ * anonymous behavior is unchanged from mock mode: events are kept in
+ * memory and mirrored to localStorage. As of Phase 7, when a user is
+ * signed in (see setInteractionsUserId, called from
+ * src/lib/store/auth-context.tsx), the same call ALSO dual-writes to the
+ * real Supabase product_interactions table and nudges taste_preferences —
+ * fire-and-forget, deliberately never awaited or allowed to throw into the
+ * caller, so a failed write degrades personalization, never browsing.
  */
 
 const STORAGE_KEY = "luvi:interactions";
 
 let cache: ProductInteraction[] = [];
 let hydrated = false;
+
+// Plain module-level state, not React context: trackInteraction() is
+// called from plain hooks (useSaveInteraction, useOutboundClick) that have
+// no reason to otherwise depend on auth state, and this file itself isn't
+// a component — a setter kept in sync by AuthProvider is the smallest
+// change that lets one call site serve both anonymous and authenticated
+// users without threading a user id through every caller.
+let currentUserId: string | null = null;
+
+export function setInteractionsUserId(userId: string | null): void {
+  currentUserId = userId;
+}
 
 function hydrate() {
   if (hydrated) return;
@@ -41,7 +55,7 @@ function generateId(): string {
   return `int_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** Records a ProductInteraction event. Mock-mode only — see module docblock. */
+/** Records a ProductInteraction event — see module docblock for the local + Supabase dual-write. */
 export function trackInteraction(
   event: Omit<ProductInteraction, "id" | "createdAt">,
 ): ProductInteraction {
@@ -53,6 +67,14 @@ export function trackInteraction(
   };
   cache = [...cache, record];
   persist();
+
+  if (currentUserId) {
+    // Fire-and-forget: never awaited, and errors are swallowed here so a
+    // Supabase hiccup can't turn a wishlist tap or a page view into a
+    // visible failure (Phase 7's "fail gracefully" rule).
+    void recordAuthenticatedInteractionAction(event).catch(() => {});
+  }
+
   return record;
 }
 

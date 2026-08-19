@@ -7,6 +7,7 @@ import {
   getTrending,
 } from "@/lib/marketplace/queries";
 import { DEFAULT_DISCOVERY_LOCATION } from "@/lib/marketplace/region-config";
+import { getPersonalizedHomeSection } from "@/lib/marketplace/personalized-home";
 import { t } from "@/lib/i18n";
 import { DiscoveryHeader } from "@/components/marketplace/discovery-header";
 import { DiscoverySection } from "@/components/marketplace/discovery-section";
@@ -18,19 +19,30 @@ import { HorizontalScroller } from "@/components/home/horizontal-scroller";
 /**
  * LUVI Home — the marketplace discovery experience (formerly the Phase 2
  * preview at /mp, now the primary entry point per Phase 3 decision A).
- * Trending / New Arrivals / Most LUVI'd / LUVI Drops / a category
- * spotlight / Stores. Full category browsing + filters live at /explore.
+ * "Para ti" (Phase 7) / Trending / New Arrivals / Most LUVI'd / LUVI Drops
+ * / a category spotlight / Stores. Full category browsing + filters live
+ * at /explore.
+ *
+ * "Para ti" is additive: for an anonymous visitor, or a signed-in user
+ * with no taste signals yet (cold-start), getPersonalizedHomeSection()
+ * comes back empty and Home renders exactly as it did before Phase 7 —
+ * the existing discovery sections are the fallback, not a separate code
+ * path (see that function's docstring for the fail-closed contract).
  */
-export default function Home() {
+export default async function Home() {
   const merchants = Object.fromEntries(getAllMerchants().map((m) => [m.id, m]));
   const allMerchants = getAllMerchants();
   const drops = getAllDrops();
+  const { recommendations } = await getPersonalizedHomeSection();
 
   return (
     <>
       <DiscoveryHeader location={DEFAULT_DISCOVERY_LOCATION} />
 
       <main className="flex flex-col gap-7 pb-8 pt-3">
+        {recommendations.length > 0 && (
+          <DiscoverySection title={t.discovery.forYou} products={recommendations} merchants={merchants} />
+        )}
         <DiscoverySection title={t.discovery.trending} products={getTrending()} merchants={merchants} />
         <DiscoverySection
           title={t.discovery.newArrivals}

@@ -1,21 +1,47 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Heart } from "lucide-react";
 import { useWishlist } from "@/lib/store/wishlist-context";
+import { useAuth } from "@/lib/store/auth-context";
 import { getMerchantById, getProductById } from "@/lib/marketplace/queries";
+import { getServerSavedProductIdsAction } from "@/lib/marketplace/actions";
 import { t } from "@/lib/i18n";
 import { TabHeader } from "@/components/marketplace/tab-header";
 import { ProductCard } from "@/components/marketplace/product-card";
 
 /**
- * Reuses the existing WishlistProvider as-is (it's just string ids in
- * localStorage) — no second wishlist implementation. Resolves ids to
- * marketplace Product/Merchant pairs and renders with the same
- * ProductCard used everywhere else.
+ * Local wishlist ids (useWishlist) are always shown — that's still what
+ * makes Saved work instantly and offline, anonymous or not (Decision 2).
+ * When signed in, this ALSO fetches the server-side saved_products ids
+ * (getServerSavedProductIdsAction) and unions them in, so a product saved
+ * from a different device shows up here too — "authenticated Saved should
+ * persist across devices" without needing /saved itself to become the
+ * source of truth for local browsing.
  */
 export default function SavedPage() {
-  const { productIds } = useWishlist();
+  const { productIds: localIds } = useWishlist();
+  const { user } = useAuth();
+  const [serverIds, setServerIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    // Resolve to [] for an anonymous user too, so the reset on sign-out
+    // still happens inside a .then() callback rather than synchronously
+    // in the effect body.
+    const idsPromise = user ? getServerSavedProductIdsAction() : Promise.resolve([]);
+    idsPromise
+      .then((ids) => {
+        if (!cancelled) setServerIds(ids);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
+
+  const productIds = Array.from(new Set([...localIds, ...serverIds]));
 
   const saved = productIds.flatMap((id) => {
     const product = getProductById(id);
