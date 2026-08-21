@@ -49,53 +49,73 @@ export function ProductDetailView({
     <>
       <MarketplaceHeader title={product.name} />
 
-      <main className="flex flex-col gap-5 pb-28">
-        <div className="relative px-4 pt-2">
-          <ProductImage
-            emoji={product.images[0]}
-            category={product.category}
-            className="aspect-square w-full"
-            faded={faded}
-          />
-          <button
-            type="button"
-            onClick={toggle}
-            aria-label={saved ? "Quitar de LUVI List" : "Agregar a LUVI List"}
-            aria-pressed={saved}
-            className="absolute right-6 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/85 shadow-sm backdrop-blur-sm active:scale-90"
-          >
-            <Heart
-              size={19}
-              className={saved ? "animate-luvi-pop fill-fucsia text-fucsia" : "text-charcoal-soft"}
+      <main className="flex flex-col gap-5 pb-28 md:gap-10 md:pb-16">
+        {/*
+          Mobile stays a single vertical stack. From md (tablet) up, this
+          becomes a two-column row (image | info) capped at max-w-5xl so the
+          image doesn't balloon with the container — a lone square image
+          stretched past ~700px reads as broken, not premium, and tablet
+          hits that at full width just as easily as desktop does.
+        */}
+        <div className="md:mx-auto md:grid md:w-full md:max-w-5xl md:grid-cols-2 md:items-start md:gap-8 lg:gap-10">
+          <div className="relative px-4 pt-2 md:px-0 md:pt-0">
+            <ProductImage
+              emoji={product.images[0]}
+              category={product.category}
+              className="aspect-square w-full"
+              faded={faded}
             />
-          </button>
-        </div>
-
-        <div className="flex flex-col gap-3 px-4">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <AvailabilityBadge availability={product.availability} />
-            {product.badges.map((badge) => (
-              <BadgePill key={badge} type={badge} />
-            ))}
+            <button
+              type="button"
+              onClick={toggle}
+              aria-label={saved ? "Quitar de LUVI List" : "Agregar a LUVI List"}
+              aria-pressed={saved}
+              className="absolute right-6 top-4 flex h-10 w-10 items-center justify-center rounded-full bg-white/85 shadow-sm backdrop-blur-sm active:scale-90"
+            >
+              <Heart
+                size={19}
+                className={saved ? "animate-luvi-pop fill-fucsia text-fucsia" : "text-charcoal-soft"}
+              />
+            </button>
           </div>
 
-          <h1 className="font-display text-2xl font-semibold leading-tight text-charcoal">
-            {product.name}
-          </h1>
+          <div className="flex flex-col gap-3 px-4 md:px-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <AvailabilityBadge availability={product.availability} />
+              {product.badges.map((badge) => (
+                <BadgePill key={badge} type={badge} />
+              ))}
+            </div>
 
-          <span className="font-display text-2xl font-bold text-charcoal">
-            {formatCurrency(product.price, product.currency)}
-          </span>
+            <h1 className="font-display text-2xl font-semibold leading-tight text-charcoal">
+              {product.name}
+            </h1>
 
-          {product.availability === "PREORDER" && product.deliveryEstimate && (
-            <p className="text-[13px] font-medium text-fucsia-dark">
-              {t.product.deliveryEstimatePrefix}: {product.deliveryEstimate}
-            </p>
-          )}
+            <span className="font-display text-2xl font-bold text-charcoal">
+              {formatCurrency(product.price, product.currency)}
+            </span>
 
-          <MerchantBlock merchant={merchant} />
+            {product.availability === "PREORDER" && product.deliveryEstimate && (
+              <p className="text-[13px] font-medium text-fucsia-dark">
+                {t.product.deliveryEstimatePrefix}: {product.deliveryEstimate}
+              </p>
+            )}
 
-          <p className="text-[14px] leading-relaxed text-charcoal-soft">{product.description}</p>
+            <MerchantBlock merchant={merchant} />
+
+            <p className="text-[14px] leading-relaxed text-charcoal-soft">{product.description}</p>
+
+            {/* From md up, the CTA lives in the info column, in flow — the
+                sticky bottom bar below is mobile-only (see md:hidden). */}
+            <button
+              type="button"
+              onClick={trigger}
+              disabled={!purchasable}
+              className="mt-2 hidden w-full items-center justify-center rounded-full bg-fucsia py-3.5 text-[15px] font-semibold text-white shadow-md transition active:scale-[0.98] disabled:bg-charcoal/10 disabled:text-charcoal-soft md:flex"
+            >
+              {purchasable ? BRAND_CTA : t.availability[product.availability]}
+            </button>
+          </div>
         </div>
 
         <DiscoverySection
@@ -106,7 +126,7 @@ export function ProductDetailView({
       </main>
 
       <div
-        className="sticky z-20 border-t border-charcoal/8 bg-cream/95 px-4 py-3 backdrop-blur-sm"
+        className="sticky z-20 border-t border-charcoal/8 bg-cream/95 px-4 py-3 backdrop-blur-sm md:hidden"
         style={{ bottom: "env(safe-area-inset-bottom)" }}
       >
         <button

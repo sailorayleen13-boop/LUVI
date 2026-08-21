@@ -12,7 +12,7 @@ export function MerchantBlock({ merchant }: { merchant: Merchant }) {
   return (
     <Link
       href={`/m/${merchant.slug}`}
-      className="flex items-center gap-3 rounded-2xl border border-charcoal/8 p-3.5 active:bg-charcoal/[0.03]"
+      className="flex items-center gap-3 rounded-2xl border border-charcoal/8 p-3.5 transition-colors hover:bg-charcoal/[0.03] active:bg-charcoal/[0.03]"
     >
       <span className="flex h-11 w-11 flex-none items-center justify-center rounded-full bg-cream-soft text-xl" aria-hidden>
         {merchant.logo}

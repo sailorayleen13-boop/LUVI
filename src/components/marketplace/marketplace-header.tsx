@@ -15,7 +15,7 @@ export function MarketplaceHeader({ title }: { title?: string }) {
   const router = useRouter();
 
   return (
-    <header className="sticky top-0 z-30 flex items-center gap-2 bg-cream/95 px-2 pb-3 pt-[calc(14px+env(safe-area-inset-top))] backdrop-blur-sm">
+    <header className="sticky top-0 z-30 flex items-center gap-2 bg-cream/95 px-2 pb-3 pt-[calc(14px+env(safe-area-inset-top))] backdrop-blur-sm lg:top-16">
       <button
         type="button"
         onClick={() => router.back()}

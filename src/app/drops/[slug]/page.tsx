@@ -66,7 +66,7 @@ export default async function DropDetailPage({
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-x-3 gap-y-5 px-4">
+        <div className="grid grid-cols-2 gap-x-3 gap-y-5 px-4 md:grid-cols-3 md:gap-x-4 md:gap-y-6 lg:grid-cols-4 lg:gap-x-5 xl:grid-cols-5">
           {products.map((product) => {
             const merchant = merchantsById[product.merchantId];
             if (!merchant) return null;

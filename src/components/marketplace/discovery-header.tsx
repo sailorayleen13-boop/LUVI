@@ -18,8 +18,11 @@ function formatLocationLabel(location: Location): string {
  */
 export function DiscoveryHeader({ location }: { location: Location }) {
   return (
-    <div className="px-4 pt-[calc(14px+env(safe-area-inset-top))] pb-1">
-      <div className="flex items-center justify-between">
+    <div className="px-4 pt-[calc(14px+env(safe-area-inset-top))] pb-1 lg:px-0 lg:pt-6">
+      {/* DesktopNav (lg+) already shows the wordmark + search affordance,
+          so this row would just repeat it right underneath — hide it there
+          and keep the location/tagline, which are page-specific. */}
+      <div className="flex items-center justify-between lg:hidden">
         <div className="flex items-center gap-0.5">
           <span className="font-display text-2xl font-bold tracking-tight text-charcoal">
             {BRAND_NAME}
@@ -34,7 +37,7 @@ export function DiscoveryHeader({ location }: { location: Location }) {
           <Search size={20} className="text-charcoal" strokeWidth={2.2} />
         </Link>
       </div>
-      <p className="mt-0.5 flex items-center gap-1 text-[12.5px] font-medium text-charcoal-faint">
+      <p className="mt-0.5 flex items-center gap-1 text-[12.5px] font-medium text-charcoal-faint lg:mt-0">
         <MapPin size={13} className="text-fucsia" />
         {formatLocationLabel(location)}
       </p>
