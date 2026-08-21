@@ -56,6 +56,9 @@ export const esCR = {
     cuteFinds: "🎀 Hallazgos cute",
     storesHeading: "🏪 Tiendas que vas a LUVI",
     forYou: "💕 Para ti",
+    forYouEyebrow: "Personalizado para vos",
+    emptyTitle: "Por ahora no encontramos nada para mostrarte",
+    emptySubtitle: "Puede que estemos actualizando el catálogo. Probá de nuevo en un momento.",
   },
   nav: {
     home: "Inicio",
@@ -135,5 +138,22 @@ export const esCR = {
     subtitle: "Elegí lo que te gusta — podés cambiarlo cuando quieras.",
     save: "Guardar",
     skip: "Omitir",
+  },
+  feedback: {
+    menuLabel: "Más opciones",
+    moreLikeThis: "Más como esto",
+    lessLikeThis: "Menos como esto",
+    notInterested: "No me interesa",
+    moreLikeThisToast: "¡Gracias! Vamos a mostrarte más así 💕",
+    lessLikeThisToast: "Listo, vamos a mostrarte menos de esto",
+    notInterestedToast: "No te vamos a mostrar esto seguido",
+    hiddenLabel: "Ocultado",
+    undo: "Deshacer",
+  },
+  errorBoundary: {
+    title: "Algo no cargó bien",
+    subtitle: "Tuvimos un problema inesperado. Intentá de nuevo.",
+    retry: "Reintentar",
+    backHome: "Ir al inicio",
   },
 } as const;
