@@ -8,11 +8,12 @@ export function getSupabaseUrl(): string {
   const raw = process.env.NEXT_PUBLIC_SUPABASE_URL;
   if (!raw) throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL");
   const trimmed = raw.trim();
-  // TEMPORARY diagnostic (fetch-failed investigation): a copy-pasted env var
-  // value can carry a leading/trailing space or a stray newline that's
-  // invisible in the Vercel dashboard but breaks URL parsing/DNS lookup.
-  // Never logs the value itself — only whether trimming changed anything
-  // and by how many characters.
+  // A copy-pasted env var value can carry a leading/trailing space or a
+  // stray newline that's invisible in the Vercel dashboard but breaks URL
+  // parsing/DNS lookup — trim defensively and warn (never logs the value
+  // itself, only whether trimming changed anything and by how many
+  // characters) so a future misconfiguration like this is obvious in logs
+  // instead of surfacing as an opaque "fetch failed".
   if (trimmed !== raw) {
     console.warn("[getSupabaseUrl] NEXT_PUBLIC_SUPABASE_URL had leading/trailing whitespace", {
       rawLength: raw.length,
