@@ -40,28 +40,47 @@ create trigger on_auth_user_created
   for each row execute function public.handle_new_user();
 
 -- ---------------------------------------------------------------------------
--- profiles: one new nullable column. Set the first time a user finishes OR
--- explicitly skips onboarding, so LUVI never nags them again either way —
--- "completed" here means "the onboarding moment happened," not "they
--- picked something." No other profile columns are needed for V1: identity
--- display already has display_name, discovery location already has
+-- profiles: two new nullable columns, kept SEPARATE on purpose.
+-- taste_onboarding_completed_at is set only when a user actually submits
+-- interest/aesthetic picks; taste_onboarding_skipped_at is set only when
+-- they skip instead. Neither column triggers a repeat redirect into
+-- onboarding today (the only auto-redirect is the one-time post-signup
+-- hop in lib/auth/actions.ts's signUpAction) — the split exists so a
+-- later, deliberate touchpoint (e.g. a light "Termina tu Taste Profile"
+-- nudge on /account) can tell "genuinely finished" apart from "chose not
+-- to, for now" without re-interrupting anyone who already made either
+-- choice. No other profile columns are needed for V1: identity display
+-- already has display_name, discovery location already has
 -- preferred_region, and there's no locale switcher yet to back a locale
 -- column (the app is es-CR only end to end) — adding one now would be
 -- speculative.
 -- ---------------------------------------------------------------------------
 
 alter table profiles add column taste_onboarding_completed_at timestamptz;
+alter table profiles add column taste_onboarding_skipped_at timestamptz;
 
 -- ---------------------------------------------------------------------------
 -- Taste Profile — a small, generic, extensible preference-weight table
 -- rather than a rigid taxonomy of dozens of columns/tables. `dimension` is
--- plain text (not an enum) specifically so a new kind of signal (e.g. a
--- future "price_tendency" or "style" dimension) is an application-level
--- addition, not a schema migration — the app's TypeScript union type is
--- what currently constrains it to 'category' | 'merchant' (see
+-- plain text (not an enum) specifically so a new kind of signal is an
+-- application-level addition, not a schema migration — the app's
+-- TypeScript union type is what currently constrains it to
+-- 'category' | 'merchant' | 'interest' | 'aesthetic' (see
 -- src/lib/marketplace/taste/types.ts). `value` is deliberately untyped
 -- text for the same reason: its meaning depends on `dimension` (a Category
--- slug for 'category', a merchant id for 'merchant').
+-- slug for 'category', a merchant id for 'merchant', an Interest identifier
+-- for 'interest', an Aesthetic identifier for 'aesthetic' — both vocabularies
+-- live in src/lib/marketplace/types.ts's INTEREST_VALUES/AESTHETIC_VALUES).
+--
+-- 'interest'/'aesthetic' are the two EXPLICIT dimensions onboarding and
+-- Account's "Tus gustos" write; 'category'/'merchant' are now INFERRED-only,
+-- learned from behavior — see recordAuthenticatedInteractionAction. Storing
+-- them as free text rather than the marketplace's existing Category enum
+-- is deliberate: a Taste Profile interest can exist with zero matching
+-- catalog products today (e.g. "fitness", "gaming" — nothing in the V1
+-- seed matches either), which is the entire point of Section 1's product
+-- brief — a Taste Profile describes demand LUVI doesn't have inventory for
+-- yet, not just a filter over what's already in stock.
 --
 -- `source` keeps explicit (onboarding / preferences-page picks) and
 -- inferred (behavior-derived) weight for the same dimension+value as
@@ -148,6 +167,78 @@ as $$
 $$;
 
 grant execute on function public.increment_taste_weight to authenticated;
+
+-- ---------------------------------------------------------------------------
+-- product_interests / product_aesthetics — the smallest structured
+-- mechanism that lets a product participate in interest/aesthetic-based
+-- recommendations (Phase 7 Taste Profile Section 3). Two narrow junction
+-- tables rather than one wider "product_tags(kind, value)" table:
+-- interest and aesthetic are conceptually different axes (what vs. how it
+-- looks/feels — see the header note above), a product commonly has several
+-- of one and few of the other, and keeping them separate means a query
+-- for "products matching this aesthetic" never has to filter out interest
+-- rows by a `kind` column. Deliberately NOT a comma-separated text column
+-- on products: a normalized one-row-per-tag table is queryable/indexable
+-- (`where interest = 'kawaii'`) and never needs string-parsing.
+--
+-- No insert/update/delete policy for anon/authenticated: same as every
+-- other table in this schema, RLS enabled with no matching policy means
+-- those roles simply can't write here — only service_role (server-only,
+-- used for seeding today) can. There's no merchant-authored tagging UI in
+-- this phase, so that's the correct, narrowest permission for now; a
+-- later phase can add a merchant-scoped write policy the same way
+-- products_write_member_or_admin already does for the products table.
+-- ---------------------------------------------------------------------------
+
+create table product_interests (
+  product_id uuid not null references products (id) on delete cascade,
+  interest text not null,
+  primary key (product_id, interest)
+);
+
+create index product_interests_interest_idx on product_interests (interest);
+
+alter table product_interests enable row level security;
+
+-- Readable by whoever can already see the underlying product — same
+-- public/member/admin boundary as products_select_public_or_member.
+create policy product_interests_select_visible_product on product_interests
+  for select
+  using (
+    exists (
+      select 1 from products p
+      where p.id = product_interests.product_id
+        and (
+          (p.status = 'active' and p.moderation_status = 'approved')
+          or is_merchant_member(p.merchant_id)
+          or is_admin()
+        )
+    )
+  );
+
+create table product_aesthetics (
+  product_id uuid not null references products (id) on delete cascade,
+  aesthetic text not null,
+  primary key (product_id, aesthetic)
+);
+
+create index product_aesthetics_aesthetic_idx on product_aesthetics (aesthetic);
+
+alter table product_aesthetics enable row level security;
+
+create policy product_aesthetics_select_visible_product on product_aesthetics
+  for select
+  using (
+    exists (
+      select 1 from products p
+      where p.id = product_aesthetics.product_id
+        and (
+          (p.status = 'active' and p.moderation_status = 'approved')
+          or is_merchant_member(p.merchant_id)
+          or is_admin()
+        )
+    )
+  );
 
 -- No changes to saved_products or product_interactions in this migration —
 -- their uuid FKs to products(id)/merchants(id), as defined in

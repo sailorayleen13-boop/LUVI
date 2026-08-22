@@ -1,7 +1,7 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { computeTrendingScores } from "@/lib/marketplace/trending";
-import type { Category, Drop, Merchant, Product, ProductInteraction } from "@/lib/marketplace/types";
+import type { Aesthetic, Category, Drop, Interest, Merchant, Product, ProductInteraction } from "@/lib/marketplace/types";
 import type { Database } from "@/lib/supabase/types";
 
 /**
@@ -77,7 +77,7 @@ function toMerchant(row: MerchantRow, location: LocationRow | undefined): Mercha
   };
 }
 
-function toProduct(row: ProductRow, images: ImageRow[]): Product {
+function toProduct(row: ProductRow, images: ImageRow[], interests: Interest[], aesthetics: Aesthetic[]): Product {
   return {
     id: row.id,
     merchantId: row.merchant_id,
@@ -96,6 +96,8 @@ function toProduct(row: ProductRow, images: ImageRow[]): Product {
     // "trending"/"new" badges computes them itself (getTrending() +
     // createdAt-based recency), same as queries.ts does today.
     badges: [],
+    interests,
+    aesthetics,
     availability: row.availability,
     deliveryEstimate: row.delivery_estimate ?? undefined,
     externalPurchaseUrl: row.external_purchase_url ?? undefined,
@@ -134,6 +136,53 @@ async function loadImages(
   for (const row of data ?? []) {
     const list = byProduct.get(row.product_id) ?? [];
     list.push(row);
+    byProduct.set(row.product_id, list);
+  }
+  return byProduct;
+}
+
+/**
+ * Batch-loads product_interests/product_aesthetics (Taste Profile Section
+ * 3) the same way loadImages does for product_images — one query for the
+ * whole batch, grouped in memory, rather than N+1 per-product queries.
+ * Cast to Interest[]/Aesthetic[] the same way `category` is cast in
+ * toProduct(): these columns are plain `text` (not Postgres enums) so the
+ * vocabulary can grow without a migration, trusting the seed/write side to
+ * only ever write a value from INTEREST_VALUES/AESTHETIC_VALUES.
+ */
+async function loadInterests(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  productIds: string[],
+): Promise<Map<string, Interest[]>> {
+  if (productIds.length === 0) return new Map();
+  const { data, error } = await supabase
+    .from("product_interests")
+    .select("product_id, interest")
+    .in("product_id", productIds);
+  if (error) throw error;
+  const byProduct = new Map<string, Interest[]>();
+  for (const row of data ?? []) {
+    const list = byProduct.get(row.product_id) ?? [];
+    list.push(row.interest as Interest);
+    byProduct.set(row.product_id, list);
+  }
+  return byProduct;
+}
+
+async function loadAesthetics(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  productIds: string[],
+): Promise<Map<string, Aesthetic[]>> {
+  if (productIds.length === 0) return new Map();
+  const { data, error } = await supabase
+    .from("product_aesthetics")
+    .select("product_id, aesthetic")
+    .in("product_id", productIds);
+  if (error) throw error;
+  const byProduct = new Map<string, Aesthetic[]>();
+  for (const row of data ?? []) {
+    const list = byProduct.get(row.product_id) ?? [];
+    list.push(row.aesthetic as Aesthetic);
     byProduct.set(row.product_id, list);
   }
   return byProduct;
@@ -210,8 +259,15 @@ async function hydrateProducts(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   rows: ProductRow[],
 ): Promise<Product[]> {
-  const images = await loadImages(supabase, rows.map((r) => r.id));
-  return rows.map((r) => toProduct(r, images.get(r.id) ?? []));
+  const ids = rows.map((r) => r.id);
+  const [images, interests, aesthetics] = await Promise.all([
+    loadImages(supabase, ids),
+    loadInterests(supabase, ids),
+    loadAesthetics(supabase, ids),
+  ]);
+  return rows.map((r) =>
+    toProduct(r, images.get(r.id) ?? [], interests.get(r.id) ?? [], aesthetics.get(r.id) ?? []),
+  );
 }
 
 export async function getAllProducts(): Promise<Product[]> {

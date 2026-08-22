@@ -52,6 +52,8 @@ function toPublicProduct(p: InternalProduct): Product {
     currency: p.currency,
     images: p.images,
     badges: p.badges,
+    interests: p.interests,
+    aesthetics: p.aesthetics,
     availability: p.availability,
     deliveryEstimate: p.deliveryEstimate,
     externalPurchaseUrl: p.externalPurchaseUrl,

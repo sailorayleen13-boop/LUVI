@@ -8,10 +8,15 @@ import {
   saveProduct,
   unsaveProduct,
 } from "@/lib/marketplace/supabase/saved-products";
-import { getMerchantsByIds, getProductsByIds } from "@/lib/marketplace/supabase/repository";
+import { getMerchantsByIds, getProductById, getProductsByIds } from "@/lib/marketplace/supabase/repository";
 import { resolveLegacyOrRealProductIds } from "@/lib/marketplace/legacy-id-migration";
 import { recordInferredSignal } from "@/lib/marketplace/taste/queries";
-import { CATEGORY_SIGNAL_WEIGHT, MERCHANT_SIGNAL_WEIGHT } from "@/lib/marketplace/taste/signal-weights";
+import {
+  AESTHETIC_SIGNAL_WEIGHT,
+  CATEGORY_SIGNAL_WEIGHT,
+  INTEREST_SIGNAL_WEIGHT,
+  MERCHANT_SIGNAL_WEIGHT,
+} from "@/lib/marketplace/taste/signal-weights";
 import type { Merchant, Product, ProductInteraction } from "@/lib/marketplace/types";
 
 /**
@@ -133,5 +138,28 @@ export async function recordAuthenticatedInteractionAction(
   const merchantDelta = MERCHANT_SIGNAL_WEIGHT[event.type];
   if (merchantDelta && event.merchantId) {
     await recordInferredSignal(user.id, "merchant", event.merchantId, merchantDelta);
+  }
+
+  // Interest/aesthetic aren't denormalized onto ProductInteraction the way
+  // category is (see types.ts) — they're per-product tag ARRAYS, not a
+  // single value, so a fresh product lookup is the simplest way to learn
+  // them here. Only fetched when this event type actually moves either
+  // weight, so a "search" event (no deltas defined) never pays for it.
+  const interestDelta = INTEREST_SIGNAL_WEIGHT[event.type];
+  const aestheticDelta = AESTHETIC_SIGNAL_WEIGHT[event.type];
+  if ((interestDelta || aestheticDelta) && event.productId) {
+    const product = await getProductById(event.productId).catch(() => undefined);
+    if (product) {
+      if (interestDelta) {
+        for (const interest of product.interests) {
+          await recordInferredSignal(user.id, "interest", interest, interestDelta);
+        }
+      }
+      if (aestheticDelta) {
+        for (const aesthetic of product.aesthetics) {
+          await recordInferredSignal(user.id, "aesthetic", aesthetic, aestheticDelta);
+        }
+      }
+    }
   }
 }

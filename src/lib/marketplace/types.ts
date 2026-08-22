@@ -46,6 +46,52 @@ export type Category =
 
 export type BadgeType = "trending" | "new";
 
+// ---------------------------------------------------------------------------
+// Taste Profile vocabulary — "what kind of thing" (Interest) and "how it
+// looks/feels" (Aesthetic), kept as two SEPARATE dimensions on purpose: a
+// user who likes "home" + "minimal" is a different shopper from one who
+// likes "home" + "colorful" (Phase 7 Taste Profile V1 Section 2). Both live
+// here next to Category because the same rule applies — stable,
+// machine-readable identifiers; a new value is an addition to this array,
+// not a migration (product_interests/product_aesthetics.interest/aesthetic
+// are plain `text` columns, not Postgres enums, for exactly this reason —
+// see 0003_taste_profile.sql). Some values may have zero matching products
+// today (see mock/products.ts's tagging) — that's expected, not a bug: the
+// Taste Profile represents what a user likes even when the catalog hasn't
+// caught up yet (see recommendations.ts's graceful zero-match backfill).
+// Visible labels always come from the es-CR dictionary (t.interest.*,
+// t.aesthetic.*), never hardcoded near these identifiers.
+// ---------------------------------------------------------------------------
+
+export const INTEREST_VALUES = [
+  "fashion",
+  "beauty",
+  "skincare",
+  "home",
+  "kawaii",
+  "tech",
+  "pets",
+  "fitness",
+  "gaming",
+  "accessories",
+  "food",
+  "travel",
+] as const;
+export type Interest = (typeof INTEREST_VALUES)[number];
+
+export const AESTHETIC_VALUES = [
+  "minimal",
+  "cute",
+  "luxury",
+  "colorful",
+  "trendy",
+  "cozy",
+  "clean",
+  "girly",
+  "streetwear",
+] as const;
+export type Aesthetic = (typeof AESTHETIC_VALUES)[number];
+
 // Presentation concerns (label strings, gradients, badge styling) are
 // deliberately NOT in this file. Phase 1 is data architecture only; label
 // tables move to the UI layer in Phase 2, and their copy should come from
@@ -114,6 +160,10 @@ export interface Product {
   /** Emoji placeholder today; swap for real photo URLs later. */
   images: string[];
   badges: BadgeType[];
+  /** Which Interests this product satisfies — may be empty; never fabricated just to cover every value. */
+  interests: Interest[];
+  /** Which Aesthetics this product fits — may be empty. */
+  aesthetics: Aesthetic[];
   availability: MerchantAvailability;
   /** Merchant-provided copy, relevant for PREORDER, e.g. "7–12 días hábiles". */
   deliveryEstimate?: string;

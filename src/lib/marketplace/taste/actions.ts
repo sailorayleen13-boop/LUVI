@@ -2,23 +2,19 @@
 
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth/session";
-import { setExplicitCategoryPreferences, markTasteOnboardingCompleted } from "@/lib/marketplace/taste/queries";
-import type { Category } from "@/lib/marketplace/types";
+import {
+  markTasteOnboardingCompleted,
+  markTasteOnboardingSkipped,
+  setExplicitPreferences,
+} from "@/lib/marketplace/taste/queries";
+import { AESTHETIC_VALUES, INTEREST_VALUES, type Aesthetic, type Interest } from "@/lib/marketplace/types";
 
-const VALID_CATEGORIES: readonly Category[] = [
-  "squishies",
-  "collectibles",
-  "pets",
-  "beauty",
-  "fashion",
-  "home",
-  "tech",
-  "gifts",
-  "viral",
-];
+function isInterest(value: string): value is Interest {
+  return (INTEREST_VALUES as readonly string[]).includes(value);
+}
 
-function isCategory(value: string): value is Category {
-  return (VALID_CATEGORIES as readonly string[]).includes(value);
+function isAesthetic(value: string): value is Aesthetic {
+  return (AESTHETIC_VALUES as readonly string[]).includes(value);
 }
 
 function safeRedirectTarget(formData: FormData): string {
@@ -28,19 +24,27 @@ function safeRedirectTarget(formData: FormData): string {
 }
 
 /**
- * "Guardar" — replaces the user's explicit category picks with whatever is
- * currently checked (see setExplicitCategoryPreferences: a full replace,
- * not additive, so unchecking something actually removes it) and marks
- * onboarding as seen. An empty selection is valid — the onboarding brief
- * requires no minimum.
+ * "Guardar" — replaces the user's explicit interest AND aesthetic picks
+ * with whatever the onboarding flow (or Account's "Tus gustos" edit
+ * screen) currently has selected. A full replace per dimension (see
+ * setExplicitPreferences), not additive, so unchecking something actually
+ * removes it. The minimum-5-interests rule is enforced in the UI
+ * (OnboardingView won't let you reach this submit with fewer selected) —
+ * this action itself doesn't re-reject a short list, matching the rest of
+ * onboarding's fail-quiet posture: there's no good recoverable UX for
+ * bouncing a completed form back at someone, so if fewer arrive anyway
+ * (e.g. JS disabled), they're saved as-is rather than the whole save
+ * failing outright.
  */
 export async function saveOnboardingAction(formData: FormData): Promise<void> {
   const user = await getCurrentUser();
   if (!user) redirect("/account");
 
-  const categories = formData.getAll("category").map(String).filter(isCategory);
+  const interests = formData.getAll("interest").map(String).filter(isInterest);
+  const aesthetics = formData.getAll("aesthetic").map(String).filter(isAesthetic);
   try {
-    await setExplicitCategoryPreferences(user.id, categories);
+    await setExplicitPreferences(user.id, "interest", interests);
+    await setExplicitPreferences(user.id, "aesthetic", aesthetics);
     await markTasteOnboardingCompleted(user.id);
   } catch {
     // Onboarding is explicitly optional/best-effort (Phase 7 Section 6) —
@@ -51,13 +55,17 @@ export async function saveOnboardingAction(formData: FormData): Promise<void> {
   redirect(safeRedirectTarget(formData));
 }
 
-/** "Omitir" — marks onboarding as seen without touching taste_preferences at all. */
+/**
+ * "Omitir" — marks onboarding as SKIPPED (not completed — see
+ * markTasteOnboardingSkipped's docstring) without touching
+ * taste_preferences at all.
+ */
 export async function skipOnboardingAction(formData: FormData): Promise<void> {
   const user = await getCurrentUser();
   if (!user) redirect("/account");
 
   try {
-    await markTasteOnboardingCompleted(user.id);
+    await markTasteOnboardingSkipped(user.id);
   } catch {
     // Same fail-quiet rule as saveOnboardingAction above.
   }

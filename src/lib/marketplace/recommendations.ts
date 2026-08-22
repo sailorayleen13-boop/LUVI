@@ -56,9 +56,26 @@ function freshnessScore(product: Product, now: number): number {
   return Math.pow(0.5, ageMs / FRESHNESS_HALF_LIFE_MS);
 }
 
-/** Sum of matching taste_preferences weight (explicit + inferred combined) for a product. */
-function affinityScore(product: Product, byCategory: Map<string, number>, byMerchant: Map<string, number>): number {
-  return (byCategory.get(product.category) ?? 0) + (byMerchant.get(product.merchantId) ?? 0);
+/**
+ * Sum of matching taste_preferences weight (explicit + inferred combined)
+ * for a product, across all four dimensions. Category/merchant contribute
+ * at most once each (a product has exactly one of both); interest/
+ * aesthetic can each contribute several times — a product tagged with two
+ * of the user's liked interests scores higher than one tagged with only
+ * one, which is the intended behavior (more genuine overlap = more
+ * relevant), not double-counting.
+ */
+function affinityScore(
+  product: Product,
+  byCategory: Map<string, number>,
+  byMerchant: Map<string, number>,
+  byInterest: Map<string, number>,
+  byAesthetic: Map<string, number>,
+): number {
+  let score = (byCategory.get(product.category) ?? 0) + (byMerchant.get(product.merchantId) ?? 0);
+  for (const interest of product.interests) score += byInterest.get(interest) ?? 0;
+  for (const aesthetic of product.aesthetics) score += byAesthetic.get(aesthetic) ?? 0;
+  return score;
 }
 
 /**
@@ -126,6 +143,14 @@ export interface RecommendProductsForUserInput {
  * whole list — callers don't need a separate code path (see
  * src/app/page.tsx, which still falls back to the existing discovery
  * sections when this returns too few results to bother showing).
+ *
+ * The SAME degradation covers a user who picked an interest/aesthetic with
+ * zero matching products today (e.g. "fitness", "luxury" — nothing in the
+ * V1 seed matches either): affinityScore() just never finds a product
+ * carrying that tag, so that preference contributes nothing to the
+ * affinity pool, and the list is filled by trending/exploration instead —
+ * no special-case branch needed, no empty feed, no penalty for having
+ * picked something LUVI doesn't carry yet.
  */
 export function recommendProductsForUser({
   products,
@@ -140,15 +165,28 @@ export function recommendProductsForUser({
 
   const byCategory = new Map<string, number>();
   const byMerchant = new Map<string, number>();
+  const byInterest = new Map<string, number>();
+  const byAesthetic = new Map<string, number>();
   for (const pref of tastePreferences) {
-    const target = pref.dimension === "category" ? byCategory : pref.dimension === "merchant" ? byMerchant : null;
+    const target =
+      pref.dimension === "category"
+        ? byCategory
+        : pref.dimension === "merchant"
+          ? byMerchant
+          : pref.dimension === "interest"
+            ? byInterest
+            : pref.dimension === "aesthetic"
+              ? byAesthetic
+              : null;
     if (!target) continue; // unknown dimension — ignore rather than throw, forward-compatible
     target.set(pref.value, (target.get(pref.value) ?? 0) + pref.weight);
   }
 
   const scored: ScoredProduct[] = eligible.map((product) => ({
     product,
-    affinity: affinityScore(product, byCategory, byMerchant) * (0.6 + 0.4 * freshnessScore(product, now)),
+    affinity:
+      affinityScore(product, byCategory, byMerchant, byInterest, byAesthetic) *
+      (0.6 + 0.4 * freshnessScore(product, now)),
     trending: trendingScores.get(product.id) ?? 0,
   }));
 

@@ -50,6 +50,7 @@ export interface Database {
           preferred_region: string | null;
           is_admin: boolean;
           taste_onboarding_completed_at: string | null;
+          taste_onboarding_skipped_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -59,6 +60,7 @@ export interface Database {
           preferred_region?: string | null;
           is_admin?: boolean;
           taste_onboarding_completed_at?: string | null;
+          taste_onboarding_skipped_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
         Relationships: [];
@@ -288,6 +290,30 @@ export interface Database {
           source: PreferenceSourceRow;
         };
         Update: Partial<Database["public"]["Tables"]["taste_preferences"]["Insert"]>;
+        Relationships: [];
+      };
+      product_interests: {
+        Row: {
+          product_id: string;
+          interest: string;
+        };
+        Insert: {
+          product_id: string;
+          interest: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["product_interests"]["Insert"]>;
+        Relationships: [];
+      };
+      product_aesthetics: {
+        Row: {
+          product_id: string;
+          aesthetic: string;
+        };
+        Insert: {
+          product_id: string;
+          aesthetic: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["product_aesthetics"]["Insert"]>;
         Relationships: [];
       };
     };
