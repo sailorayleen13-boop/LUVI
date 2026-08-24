@@ -1,0 +1,444 @@
+import "server-only";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { slugify } from "@/lib/marketplace/slug";
+import type { Aesthetic, Category, Interest, Merchant, MerchantAvailability, Product } from "@/lib/marketplace/types";
+import type { Database } from "@/lib/supabase/types";
+
+/**
+ * The merchant-write side of the data layer — everything a signed-in
+ * seller reads/writes about their OWN store and products. Kept separate
+ * from supabase/repository.ts (the public, read-only storefront layer)
+ * because the concerns genuinely differ: every function here trusts RLS
+ * to enforce ownership (products_write_member_or_admin,
+ * merchants_update_owner_or_admin, etc. — see 0002_rls.sql/0004), reads
+ * DRAFTS and non-approved rows the public layer never should, and is only
+ * ever called from Server Actions that have already resolved the current
+ * user from the session (never a client-supplied id).
+ */
+
+type MerchantRow = Database["public"]["Tables"]["merchants"]["Row"];
+type ProductRow = Database["public"]["Tables"]["products"]["Row"];
+type ImageRow = Database["public"]["Tables"]["product_images"]["Row"];
+type LocationRow = Database["public"]["Tables"]["merchant_locations"]["Row"];
+
+/**
+ * Product PLUS its row-level `status` — the public Product type
+ * deliberately omits this (a public/customer query only ever returns
+ * status='active' rows, so the field would be dead weight there), but the
+ * Merchant Dashboard needs to tell "archived" apart from every live
+ * availability state, so this owner-scoped layer exposes it.
+ */
+export interface OwnedProduct extends Product {
+  status: "active" | "archived";
+}
+
+function toMerchant(row: MerchantRow, location: LocationRow | undefined): Merchant {
+  return {
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    logo: row.logo ?? "",
+    description: row.description,
+    location: {
+      country: "CR",
+      region: location?.region ?? undefined,
+      city: location?.city ?? undefined,
+      addressOptional: location?.address_optional ?? undefined,
+    },
+    website: row.website ?? undefined,
+    whatsapp: row.whatsapp ?? undefined,
+    instagram: row.instagram ?? undefined,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+function toProduct(row: ProductRow, images: ImageRow[], interests: Interest[], aesthetics: Aesthetic[]): OwnedProduct {
+  return {
+    id: row.id,
+    status: row.status,
+    merchantId: row.merchant_id,
+    slug: row.slug,
+    name: row.name,
+    description: row.description,
+    shortDescription: row.short_description,
+    category: row.category as Category,
+    price: Number(row.price),
+    originalPrice: row.original_price === null ? undefined : Number(row.original_price),
+    currency: row.currency,
+    images: images
+      .slice()
+      .sort((a, b) => a.position - b.position)
+      .map((i) => i.url),
+    badges: [],
+    interests,
+    aesthetics,
+    availability: row.availability,
+    isDraft: row.is_draft,
+    deliveryEstimate: row.delivery_estimate ?? undefined,
+    externalPurchaseUrl: row.external_purchase_url ?? undefined,
+    whatsappUrl: row.whatsapp_url ?? undefined,
+    instagramUrl: row.instagram_url ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+async function generateUniqueMerchantSlug(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  base: string,
+): Promise<string> {
+  const root = slugify(base);
+  let candidate = root;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const { data, error } = await supabase.from("merchants").select("id").eq("slug", candidate).maybeSingle();
+    if (error) throw error;
+    if (!data) return candidate;
+    candidate = `${root}-${Math.random().toString(36).slice(2, 6)}`;
+  }
+  // Astronomically unlikely — 20 random collisions in a row — but never loop forever.
+  return `${root}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+async function generateUniqueProductSlug(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  merchantId: string,
+  base: string,
+): Promise<string> {
+  const root = slugify(base);
+  let candidate = root;
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const { data, error } = await supabase
+      .from("products")
+      .select("id")
+      .eq("merchant_id", merchantId)
+      .eq("slug", candidate)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return candidate;
+    candidate = `${root}-${Math.random().toString(36).slice(2, 6)}`;
+  }
+  return `${root}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Store (merchant) creation / ownership
+// ---------------------------------------------------------------------------
+
+export interface CreateStoreInput {
+  name: string;
+  region?: string;
+  city?: string;
+  addressOptional?: string;
+  whatsapp?: string;
+  instagram?: string;
+  website?: string;
+  logo?: string;
+}
+
+/**
+ * Creates the merchant row, its primary location, and the owner membership
+ * — as the CURRENT user (userId is always resolved server-side from the
+ * session by the calling Server Action, never trusted from a form field).
+ * Auto-publishes (status='active', moderation_status='approved'): Phase 8's
+ * documented V1 moderation stance — see 0004_merchant_media.sql's header
+ * comment — there is no review queue in this phase.
+ */
+export async function createStore(userId: string, input: CreateStoreInput): Promise<Merchant> {
+  const supabase = await createSupabaseServerClient();
+  const slug = await generateUniqueMerchantSlug(supabase, input.name);
+
+  const { data: merchant, error: merchantError } = await supabase
+    .from("merchants")
+    .insert({
+      slug,
+      name: input.name,
+      logo: input.logo ?? null,
+      website: input.website || null,
+      whatsapp: input.whatsapp || null,
+      instagram: input.instagram || null,
+      status: "active",
+      moderation_status: "approved",
+    })
+    .select("*")
+    .single();
+  if (merchantError) throw merchantError;
+
+  const { error: memberError } = await supabase
+    .from("merchant_members")
+    .insert({ merchant_id: merchant.id, user_id: userId, role: "owner" });
+  if (memberError) throw memberError;
+
+  let location: LocationRow | undefined;
+  if (input.region || input.city || input.addressOptional) {
+    const { data: locationRow, error: locationError } = await supabase
+      .from("merchant_locations")
+      .insert({
+        merchant_id: merchant.id,
+        region: input.region || null,
+        city: input.city || null,
+        address_optional: input.addressOptional || null,
+        is_primary: true,
+      })
+      .select("*")
+      .single();
+    if (locationError) throw locationError;
+    location = locationRow;
+  }
+
+  return toMerchant(merchant, location);
+}
+
+/** The first store this user is a member of, or null if they aren't a seller yet. Phase 8 V1 assumes one store per seller in the UI (the data model supports more). */
+export async function getOwnedMerchant(userId: string): Promise<Merchant | null> {
+  const supabase = await createSupabaseServerClient();
+  const { data: membership, error: membershipError } = await supabase
+    .from("merchant_members")
+    .select("merchant_id")
+    .eq("user_id", userId)
+    .limit(1)
+    .maybeSingle();
+  if (membershipError) throw membershipError;
+  if (!membership) return null;
+
+  const { data: merchant, error: merchantError } = await supabase
+    .from("merchants")
+    .select("*")
+    .eq("id", membership.merchant_id)
+    .maybeSingle();
+  if (merchantError) throw merchantError;
+  if (!merchant) return null;
+
+  const { data: location } = await supabase
+    .from("merchant_locations")
+    .select("*")
+    .eq("merchant_id", merchant.id)
+    .eq("is_primary", true)
+    .maybeSingle();
+
+  return toMerchant(merchant, location ?? undefined);
+}
+
+export interface UpdateStoreInput {
+  name?: string;
+  region?: string;
+  city?: string;
+  addressOptional?: string;
+  whatsapp?: string;
+  instagram?: string;
+  website?: string;
+  logo?: string;
+}
+
+export async function updateStore(merchantId: string, input: UpdateStoreInput): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  const patch: Database["public"]["Tables"]["merchants"]["Update"] = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.whatsapp !== undefined) patch.whatsapp = input.whatsapp || null;
+  if (input.instagram !== undefined) patch.instagram = input.instagram || null;
+  if (input.website !== undefined) patch.website = input.website || null;
+  if (input.logo !== undefined) patch.logo = input.logo || null;
+  if (Object.keys(patch).length > 0) {
+    const { error } = await supabase.from("merchants").update(patch).eq("id", merchantId);
+    if (error) throw error;
+  }
+
+  if (input.region !== undefined || input.city !== undefined || input.addressOptional !== undefined) {
+    const { data: existing } = await supabase
+      .from("merchant_locations")
+      .select("id")
+      .eq("merchant_id", merchantId)
+      .eq("is_primary", true)
+      .maybeSingle();
+    const locationPatch = {
+      region: input.region || null,
+      city: input.city || null,
+      address_optional: input.addressOptional || null,
+    };
+    if (existing) {
+      const { error } = await supabase.from("merchant_locations").update(locationPatch).eq("id", existing.id);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase
+        .from("merchant_locations")
+        .insert({ merchant_id: merchantId, is_primary: true, ...locationPatch });
+      if (error) throw error;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Products (owner-scoped — includes drafts, relies on RLS for ownership)
+// ---------------------------------------------------------------------------
+
+async function hydrateOwnedProducts(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  rows: ProductRow[],
+): Promise<OwnedProduct[]> {
+  if (rows.length === 0) return [];
+  const ids = rows.map((r) => r.id);
+  const [{ data: images }, { data: interestRows }, { data: aestheticRows }] = await Promise.all([
+    supabase.from("product_images").select("*").in("product_id", ids),
+    supabase.from("product_interests").select("product_id, interest").in("product_id", ids),
+    supabase.from("product_aesthetics").select("product_id, aesthetic").in("product_id", ids),
+  ]);
+  const imagesByProduct = new Map<string, ImageRow[]>();
+  for (const row of images ?? []) {
+    const list = imagesByProduct.get(row.product_id) ?? [];
+    list.push(row);
+    imagesByProduct.set(row.product_id, list);
+  }
+  const interestsByProduct = new Map<string, Interest[]>();
+  for (const row of interestRows ?? []) {
+    const list = interestsByProduct.get(row.product_id) ?? [];
+    list.push(row.interest as Interest);
+    interestsByProduct.set(row.product_id, list);
+  }
+  const aestheticsByProduct = new Map<string, Aesthetic[]>();
+  for (const row of aestheticRows ?? []) {
+    const list = aestheticsByProduct.get(row.product_id) ?? [];
+    list.push(row.aesthetic as Aesthetic);
+    aestheticsByProduct.set(row.product_id, list);
+  }
+  return rows.map((r) =>
+    toProduct(
+      r,
+      imagesByProduct.get(r.id) ?? [],
+      interestsByProduct.get(r.id) ?? [],
+      aestheticsByProduct.get(r.id) ?? [],
+    ),
+  );
+}
+
+/** Every product owned by this merchant, newest first — drafts and archived included (RLS's member branch, not the public branch). */
+export async function getMerchantProducts(merchantId: string): Promise<OwnedProduct[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("products")
+    .select("*")
+    .eq("merchant_id", merchantId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return hydrateOwnedProducts(supabase, data ?? []);
+}
+
+export async function getOwnedProductById(productId: string): Promise<OwnedProduct | undefined> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase.from("products").select("*").eq("id", productId).maybeSingle();
+  if (error) throw error;
+  if (!data) return undefined;
+  const [product] = await hydrateOwnedProducts(supabase, [data]);
+  return product;
+}
+
+export interface ProductInput {
+  name: string;
+  description?: string;
+  category: Category;
+  price: number;
+  originalPrice?: number;
+  availability: MerchantAvailability;
+  deliveryEstimate?: string;
+  externalPurchaseUrl?: string;
+  whatsappUrl?: string;
+  instagramUrl?: string;
+}
+
+export async function createProduct(
+  merchantId: string,
+  input: ProductInput,
+  isDraft: boolean,
+): Promise<OwnedProduct> {
+  const supabase = await createSupabaseServerClient();
+  const slug = await generateUniqueProductSlug(supabase, merchantId, input.name);
+
+  const { data, error } = await supabase
+    .from("products")
+    .insert({
+      merchant_id: merchantId,
+      slug,
+      name: input.name,
+      description: input.description ?? "",
+      short_description: (input.description ?? "").slice(0, 160),
+      category: input.category,
+      price: input.price,
+      original_price: input.originalPrice ?? null,
+      availability: input.availability,
+      delivery_estimate: input.deliveryEstimate || null,
+      external_purchase_url: input.externalPurchaseUrl || null,
+      whatsapp_url: input.whatsappUrl || null,
+      instagram_url: input.instagramUrl || null,
+      moderation_status: "approved",
+      status: "active",
+      is_draft: isDraft,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  const [product] = await hydrateOwnedProducts(supabase, [data]);
+  return product;
+}
+
+export async function updateProduct(
+  productId: string,
+  input: Partial<ProductInput> & { isDraft?: boolean },
+): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  const patch: Database["public"]["Tables"]["products"]["Update"] = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.description !== undefined) {
+    patch.description = input.description;
+    patch.short_description = input.description.slice(0, 160);
+  }
+  if (input.category !== undefined) patch.category = input.category;
+  if (input.price !== undefined) patch.price = input.price;
+  if (input.originalPrice !== undefined) patch.original_price = input.originalPrice ?? null;
+  if (input.availability !== undefined) patch.availability = input.availability;
+  if (input.deliveryEstimate !== undefined) patch.delivery_estimate = input.deliveryEstimate || null;
+  if (input.externalPurchaseUrl !== undefined) patch.external_purchase_url = input.externalPurchaseUrl || null;
+  if (input.whatsappUrl !== undefined) patch.whatsapp_url = input.whatsappUrl || null;
+  if (input.instagramUrl !== undefined) patch.instagram_url = input.instagramUrl || null;
+  if (input.isDraft !== undefined) patch.is_draft = input.isDraft;
+  if (Object.keys(patch).length === 0) return;
+  const { error } = await supabase.from("products").update(patch).eq("id", productId);
+  if (error) throw error;
+}
+
+export async function setProductAvailability(productId: string, availability: MerchantAvailability): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.from("products").update({ availability }).eq("id", productId);
+  if (error) throw error;
+}
+
+export async function archiveProduct(productId: string): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.from("products").update({ status: "archived" }).eq("id", productId);
+  if (error) throw error;
+}
+
+// ---------------------------------------------------------------------------
+// Product images
+// ---------------------------------------------------------------------------
+
+export async function addProductImage(productId: string, url: string, position: number): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.from("product_images").insert({ product_id: productId, url, position });
+  if (error) throw error;
+}
+
+export async function deleteProductImage(imageId: string): Promise<void> {
+  const supabase = await createSupabaseServerClient();
+  const { error } = await supabase.from("product_images").delete().eq("id", imageId);
+  if (error) throw error;
+}
+
+export async function getProductImages(productId: string): Promise<{ id: string; url: string; position: number }[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("product_images")
+    .select("id, url, position")
+    .eq("product_id", productId)
+    .order("position", { ascending: true });
+  if (error) throw error;
+  return data ?? [];
+}

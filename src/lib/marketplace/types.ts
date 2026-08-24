@@ -165,6 +165,10 @@ export interface Product {
   /** Which Aesthetics this product fits — may be empty. */
   aesthetics: Aesthetic[];
   availability: MerchantAvailability;
+  /** Optional "before" price for a strike-through discount display — Phase 8's optional original-price field. */
+  originalPrice?: number;
+  /** Phase 8: true while a seller is still working on the listing — never returned by a public/customer-facing query. */
+  isDraft: boolean;
   /** Merchant-provided copy, relevant for PREORDER, e.g. "7–12 días hábiles". */
   deliveryEstimate?: string;
   /** Product-specific purchase link; falls back to the merchant's general links when unset. */

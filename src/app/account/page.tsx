@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { ChevronRight, Heart, LogOut, Sparkles } from "lucide-react";
+import { ChevronRight, Heart, LogOut, Sparkles, Store } from "lucide-react";
 import { getCurrentUserWithProfile } from "@/lib/auth/session";
 import { signOutAction } from "@/lib/auth/actions";
 import { getTastePreferences } from "@/lib/marketplace/taste/queries";
+import { getOwnedMerchant } from "@/lib/marketplace/supabase/merchant-repository";
 import { AuthPanel } from "@/components/account/auth-panel";
 import { TabHeader } from "@/components/marketplace/tab-header";
 import { t } from "@/lib/i18n";
@@ -53,6 +54,15 @@ export default async function AccountPage() {
     // a failed read just shows the empty ("elegí tus gustos") state below.
   }
   const hasTasteProfile = interests.length > 0 || aesthetics.length > 0;
+
+  let hasStore = false;
+  try {
+    hasStore = (await getOwnedMerchant(user.id)) !== null;
+  } catch {
+    // Same fail-quiet rule as the Taste Profile read above — worst case the
+    // CTA reads "Vendé en LUVI" for someone who already has a store, which
+    // just re-routes them from /sell to /merchant instead of blocking them.
+  }
 
   return (
     <>
@@ -134,6 +144,22 @@ export default async function AccountPage() {
             <Heart size={16} className="text-fucsia-dark" />
           </span>
           <span className="flex-1 text-[14px] font-medium text-charcoal">{t.account.savedLink}</span>
+          <ChevronRight size={16} className="text-charcoal-faint" />
+        </Link>
+
+        <Link
+          href={hasStore ? "/merchant" : "/sell"}
+          className="flex items-center gap-3 rounded-2xl border border-charcoal/8 bg-gradient-to-br from-fucsia-light/60 to-cream-soft p-4 transition-colors hover:bg-charcoal/[0.03] active:bg-charcoal/[0.03]"
+        >
+          <span className="flex h-9 w-9 flex-none items-center justify-center rounded-full bg-fucsia-light">
+            <Store size={16} className="text-fucsia-dark" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[14px] font-semibold text-charcoal">
+              {hasStore ? t.account.goToStoreCta : t.account.sellCta}
+            </p>
+            {!hasStore && <p className="text-[12px] text-charcoal-faint">{t.account.sellSubtitle}</p>}
+          </div>
           <ChevronRight size={16} className="text-charcoal-faint" />
         </Link>
 

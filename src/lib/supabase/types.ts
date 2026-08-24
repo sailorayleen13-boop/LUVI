@@ -151,6 +151,8 @@ export interface Database {
           instagram_url: string | null;
           moderation_status: ModerationStatusRow;
           status: ProductStatusRow;
+          is_draft: boolean;
+          original_price: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -170,6 +172,8 @@ export interface Database {
           instagram_url?: string | null;
           moderation_status?: ModerationStatusRow;
           status?: ProductStatusRow;
+          is_draft?: boolean;
+          original_price?: number | null;
         };
         Update: Partial<Database["public"]["Tables"]["products"]["Insert"]>;
         Relationships: [];

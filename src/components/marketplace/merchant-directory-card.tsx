@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { Merchant } from "@/lib/marketplace/types";
 import { t } from "@/lib/i18n";
+import { MerchantLogo } from "@/components/marketplace/merchant-logo";
 
 export function MerchantDirectoryCard({
   merchant,
@@ -16,12 +17,7 @@ export function MerchantDirectoryCard({
       href={`/m/${merchant.slug}`}
       className="flex gap-3 rounded-2xl border border-charcoal/8 p-3.5 transition-colors hover:bg-charcoal/[0.03] active:bg-charcoal/[0.03]"
     >
-      <span
-        className="flex h-12 w-12 flex-none items-center justify-center rounded-full bg-cream-soft text-2xl"
-        aria-hidden
-      >
-        {merchant.logo}
-      </span>
+      <MerchantLogo logo={merchant.logo} className="h-12 w-12 text-2xl" />
       <div className="min-w-0 flex-1">
         <p className="text-[14px] font-semibold text-charcoal">{merchant.name}</p>
         <p className="text-[12px] text-charcoal-faint">{location}</p>

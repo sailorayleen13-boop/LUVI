@@ -7,6 +7,7 @@ import { trackInteraction } from "@/lib/marketplace/interactions";
 import { t } from "@/lib/i18n";
 import { MarketplaceHeader } from "@/components/marketplace/marketplace-header";
 import { ProductCard } from "@/components/marketplace/product-card";
+import { MerchantLogo } from "@/components/marketplace/merchant-logo";
 
 export function MerchantDetailView({
   merchant,
@@ -27,9 +28,7 @@ export function MerchantDetailView({
 
       <main className="flex flex-col gap-5 pb-8">
         <div className="flex flex-col items-center gap-2 px-4 pt-2 text-center">
-          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-cream-soft text-3xl" aria-hidden>
-            {merchant.logo}
-          </span>
+          <MerchantLogo logo={merchant.logo} className="h-16 w-16 text-3xl" />
           <h1 className="font-display text-xl font-bold text-charcoal">{merchant.name}</h1>
           <p className="text-[12.5px] text-charcoal-faint">{location}</p>
           <p className="max-w-xs text-[13.5px] leading-relaxed text-charcoal-soft lg:max-w-md">

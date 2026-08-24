@@ -25,7 +25,7 @@ type DropRow = Database["public"]["Tables"]["drops"]["Row"];
 
 const MERCHANT_COLUMNS = "id, slug, name, logo, description, website, whatsapp, instagram, status, created_at";
 const PRODUCT_COLUMNS =
-  "id, merchant_id, slug, name, description, short_description, category, price, currency, availability, delivery_estimate, external_purchase_url, whatsapp_url, instagram_url, created_at, updated_at";
+  "id, merchant_id, slug, name, description, short_description, category, price, original_price, currency, availability, is_draft, delivery_estimate, external_purchase_url, whatsapp_url, instagram_url, created_at, updated_at";
 
 // The public allowlist selects fewer columns than the full table Row (no
 // moderation_status/contact_email/status) — same "allowlist, not
@@ -46,8 +46,10 @@ type ProductRow = Pick<
   | "short_description"
   | "category"
   | "price"
+  | "original_price"
   | "currency"
   | "availability"
+  | "is_draft"
   | "delivery_estimate"
   | "external_purchase_url"
   | "whatsapp_url"
@@ -87,6 +89,7 @@ function toProduct(row: ProductRow, images: ImageRow[], interests: Interest[], a
     shortDescription: row.short_description,
     category: row.category as Category,
     price: Number(row.price),
+    originalPrice: row.original_price === null ? undefined : Number(row.original_price),
     currency: row.currency,
     images: images
       .slice()
@@ -99,6 +102,7 @@ function toProduct(row: ProductRow, images: ImageRow[], interests: Interest[], a
     interests,
     aesthetics,
     availability: row.availability,
+    isDraft: row.is_draft,
     deliveryEstimate: row.delivery_estimate ?? undefined,
     externalPurchaseUrl: row.external_purchase_url ?? undefined,
     whatsappUrl: row.whatsapp_url ?? undefined,
