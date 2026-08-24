@@ -38,6 +38,7 @@ export type InteractionTypeRow =
   | "luvi_it_click"
   | "store_view"
   | "interest";
+export type PreferenceSourceRow = "explicit" | "inferred";
 
 export interface Database {
   public: {
@@ -48,6 +49,8 @@ export interface Database {
           display_name: string | null;
           preferred_region: string | null;
           is_admin: boolean;
+          taste_onboarding_completed_at: string | null;
+          taste_onboarding_skipped_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -56,6 +59,8 @@ export interface Database {
           display_name?: string | null;
           preferred_region?: string | null;
           is_admin?: boolean;
+          taste_onboarding_completed_at?: string | null;
+          taste_onboarding_skipped_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["profiles"]["Insert"]>;
         Relationships: [];
@@ -266,8 +271,64 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["saved_products"]["Insert"]>;
         Relationships: [];
       };
+      taste_preferences: {
+        Row: {
+          id: string;
+          user_id: string;
+          dimension: string;
+          value: string;
+          weight: number;
+          source: PreferenceSourceRow;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          dimension: string;
+          value: string;
+          weight?: number;
+          source: PreferenceSourceRow;
+        };
+        Update: Partial<Database["public"]["Tables"]["taste_preferences"]["Insert"]>;
+        Relationships: [];
+      };
+      product_interests: {
+        Row: {
+          product_id: string;
+          interest: string;
+        };
+        Insert: {
+          product_id: string;
+          interest: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["product_interests"]["Insert"]>;
+        Relationships: [];
+      };
+      product_aesthetics: {
+        Row: {
+          product_id: string;
+          aesthetic: string;
+        };
+        Insert: {
+          product_id: string;
+          aesthetic: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["product_aesthetics"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: Record<string, never>;
-    Functions: Record<string, never>;
+    Functions: {
+      increment_taste_weight: {
+        Args: {
+          p_user_id: string;
+          p_dimension: string;
+          p_value: string;
+          p_source: PreferenceSourceRow;
+          p_delta: number;
+        };
+        Returns: undefined;
+      };
+    };
   };
 }

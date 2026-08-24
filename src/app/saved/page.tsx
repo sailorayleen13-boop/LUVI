@@ -1,29 +1,46 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Heart } from "lucide-react";
 import { useWishlist } from "@/lib/store/wishlist-context";
-import { getMerchantById, getProductById } from "@/lib/marketplace/queries";
+import { useAuth } from "@/lib/store/auth-context";
+import { getSavedProductsAction } from "@/lib/marketplace/actions";
 import { t } from "@/lib/i18n";
 import { TabHeader } from "@/components/marketplace/tab-header";
 import { ProductCard } from "@/components/marketplace/product-card";
+import type { Merchant, Product } from "@/lib/marketplace/types";
 
 /**
- * Reuses the existing WishlistProvider as-is (it's just string ids in
- * localStorage) — no second wishlist implementation. Resolves ids to
- * marketplace Product/Merchant pairs and renders with the same
- * ProductCard used everywhere else.
+ * Local wishlist ids (useWishlist) are always shown — that's still what
+ * makes Saved work instantly and offline, anonymous or not (Decision 2).
+ * When signed in, this ALSO fetches the server-side saved_products ids and
+ * unions them in, so a product saved from a different device shows up
+ * here too. As of Phase 7's catalog cutover, resolving those ids to full
+ * Product/Merchant records happens server-side, in one call
+ * (getSavedProductsAction): it also routes local ids through the legacy
+ * mock-id migration (see legacy-id-migration.ts) so a pre-cutover local
+ * save (an old "p1"-style id) is safely resolved or dropped rather than
+ * ever reaching the database or crashing this page.
  */
 export default function SavedPage() {
-  const { productIds } = useWishlist();
+  const { productIds: localIds } = useWishlist();
+  const { user } = useAuth();
+  const [saved, setSaved] = useState<Array<{ product: Product; merchant: Merchant }>>([]);
 
-  const saved = productIds.flatMap((id) => {
-    const product = getProductById(id);
-    if (!product) return [];
-    const merchant = getMerchantById(product.merchantId);
-    if (!merchant) return [];
-    return [{ product, merchant }];
-  });
+  useEffect(() => {
+    let cancelled = false;
+    getSavedProductsAction(localIds)
+      .then((result) => {
+        if (!cancelled) setSaved(result);
+      })
+      .catch(() => {
+        if (!cancelled) setSaved([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [localIds, user]);
 
   if (saved.length === 0) {
     return (

@@ -1,16 +1,17 @@
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { computeTrendingScores } from "@/lib/marketplace/trending";
-import type { Category, Drop, Merchant, Product, ProductInteraction } from "@/lib/marketplace/types";
+import type { Aesthetic, Category, Drop, Interest, Merchant, Product, ProductInteraction } from "@/lib/marketplace/types";
 import type { Database } from "@/lib/supabase/types";
 
 /**
  * Supabase-backed implementation of the same conceptual API as
  * src/lib/marketplace/queries.ts (getAllMerchants, getProductBySlug,
- * getTrending, etc.) — written to validate the Phase 6 infrastructure
- * (schema + RLS + client separation) end to end, NOT wired into any page
- * yet. queries.ts stays mock-backed and is what the UI actually calls today
- * (see Phase 6 Step 6 / the completion report for why).
+ * getTrending, etc.) — as of Phase 7's catalog cutover this is the
+ * storefront's real data source, reached through the mock-fallback facade
+ * at src/lib/marketplace/catalog.ts (never called directly from a page).
+ * queries.ts/mock/* stay in the tree as that facade's dev/offline fallback
+ * and for isolated tests — no longer the production source of truth.
  *
  * Every function here does its own explicit column allowlisting on top of
  * RLS — same "allowlist, not destructure-and-omit" rule queries.ts's
@@ -76,7 +77,7 @@ function toMerchant(row: MerchantRow, location: LocationRow | undefined): Mercha
   };
 }
 
-function toProduct(row: ProductRow, images: ImageRow[]): Product {
+function toProduct(row: ProductRow, images: ImageRow[], interests: Interest[], aesthetics: Aesthetic[]): Product {
   return {
     id: row.id,
     merchantId: row.merchant_id,
@@ -95,6 +96,8 @@ function toProduct(row: ProductRow, images: ImageRow[]): Product {
     // "trending"/"new" badges computes them itself (getTrending() +
     // createdAt-based recency), same as queries.ts does today.
     badges: [],
+    interests,
+    aesthetics,
     availability: row.availability,
     deliveryEstimate: row.delivery_estimate ?? undefined,
     externalPurchaseUrl: row.external_purchase_url ?? undefined,
@@ -138,6 +141,53 @@ async function loadImages(
   return byProduct;
 }
 
+/**
+ * Batch-loads product_interests/product_aesthetics (Taste Profile Section
+ * 3) the same way loadImages does for product_images — one query for the
+ * whole batch, grouped in memory, rather than N+1 per-product queries.
+ * Cast to Interest[]/Aesthetic[] the same way `category` is cast in
+ * toProduct(): these columns are plain `text` (not Postgres enums) so the
+ * vocabulary can grow without a migration, trusting the seed/write side to
+ * only ever write a value from INTEREST_VALUES/AESTHETIC_VALUES.
+ */
+async function loadInterests(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  productIds: string[],
+): Promise<Map<string, Interest[]>> {
+  if (productIds.length === 0) return new Map();
+  const { data, error } = await supabase
+    .from("product_interests")
+    .select("product_id, interest")
+    .in("product_id", productIds);
+  if (error) throw error;
+  const byProduct = new Map<string, Interest[]>();
+  for (const row of data ?? []) {
+    const list = byProduct.get(row.product_id) ?? [];
+    list.push(row.interest as Interest);
+    byProduct.set(row.product_id, list);
+  }
+  return byProduct;
+}
+
+async function loadAesthetics(
+  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
+  productIds: string[],
+): Promise<Map<string, Aesthetic[]>> {
+  if (productIds.length === 0) return new Map();
+  const { data, error } = await supabase
+    .from("product_aesthetics")
+    .select("product_id, aesthetic")
+    .in("product_id", productIds);
+  if (error) throw error;
+  const byProduct = new Map<string, Aesthetic[]>();
+  for (const row of data ?? []) {
+    const list = byProduct.get(row.product_id) ?? [];
+    list.push(row.aesthetic as Aesthetic);
+    byProduct.set(row.product_id, list);
+  }
+  return byProduct;
+}
+
 // ---------------------------------------------------------------------------
 // Merchants
 // ---------------------------------------------------------------------------
@@ -170,6 +220,37 @@ export async function getMerchantBySlug(slug: string): Promise<Merchant | undefi
   return toMerchant(data, locations.get(data.id));
 }
 
+export async function getMerchantById(id: string): Promise<Merchant | undefined> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("merchants")
+    .select(MERCHANT_COLUMNS)
+    .eq("id", id)
+    .eq("status", "active")
+    .eq("moderation_status", "approved")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return undefined;
+  const locations = await loadPrimaryLocations(supabase, [data.id]);
+  return toMerchant(data, locations.get(data.id));
+}
+
+/** Batch id lookup for /saved (which resolves a set of saved product ids into merchants). */
+export async function getMerchantsByIds(ids: string[]): Promise<Merchant[]> {
+  if (ids.length === 0) return [];
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("merchants")
+    .select(MERCHANT_COLUMNS)
+    .in("id", ids)
+    .eq("status", "active")
+    .eq("moderation_status", "approved");
+  if (error) throw error;
+  const rows = data ?? [];
+  const locations = await loadPrimaryLocations(supabase, rows.map((r) => r.id));
+  return rows.map((r) => toMerchant(r, locations.get(r.id)));
+}
+
 // ---------------------------------------------------------------------------
 // Products
 // ---------------------------------------------------------------------------
@@ -178,8 +259,15 @@ async function hydrateProducts(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   rows: ProductRow[],
 ): Promise<Product[]> {
-  const images = await loadImages(supabase, rows.map((r) => r.id));
-  return rows.map((r) => toProduct(r, images.get(r.id) ?? []));
+  const ids = rows.map((r) => r.id);
+  const [images, interests, aesthetics] = await Promise.all([
+    loadImages(supabase, ids),
+    loadInterests(supabase, ids),
+    loadAesthetics(supabase, ids),
+  ]);
+  return rows.map((r) =>
+    toProduct(r, images.get(r.id) ?? [], interests.get(r.id) ?? [], aesthetics.get(r.id) ?? []),
+  );
 }
 
 export async function getAllProducts(): Promise<Product[]> {
@@ -208,6 +296,55 @@ export async function getProductBySlug(slug: string): Promise<Product | undefine
   return product;
 }
 
+export async function getProductById(id: string): Promise<Product | undefined> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("products")
+    .select(PRODUCT_COLUMNS)
+    .eq("id", id)
+    .eq("status", "active")
+    .eq("moderation_status", "approved")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return undefined;
+  const [product] = await hydrateProducts(supabase, [data]);
+  return product;
+}
+
+/** Batch id lookup — /saved resolves a set of saved product ids (local + server) this way. */
+export async function getProductsByIds(ids: string[]): Promise<Product[]> {
+  if (ids.length === 0) return [];
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("products")
+    .select(PRODUCT_COLUMNS)
+    .in("id", ids)
+    .eq("status", "active")
+    .eq("moderation_status", "approved");
+  if (error) throw error;
+  return hydrateProducts(supabase, data ?? []);
+}
+
+/**
+ * Batch slug -> id lookup, used only by legacy-id-migration.ts: the mock
+ * catalog's slugs match the real seeded catalog's slugs 1:1 (seed.sql was
+ * written to mirror mock/products.ts), so a stale localStorage id like "p1"
+ * resolves to its real UUID via this slug bridge rather than being sent to
+ * the database as-is.
+ */
+export async function getProductIdsBySlugs(slugs: string[]): Promise<Map<string, string>> {
+  if (slugs.length === 0) return new Map();
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("products")
+    .select("id, slug")
+    .in("slug", slugs)
+    .eq("status", "active")
+    .eq("moderation_status", "approved");
+  if (error) throw error;
+  return new Map((data ?? []).map((r) => [r.slug, r.id]));
+}
+
 export async function getProductsByMerchant(merchantId: string): Promise<Product[]> {
   const supabase = await createSupabaseServerClient();
   const { data, error } = await supabase
@@ -230,6 +367,20 @@ export async function getByCategory(category: Category, limit?: number): Promise
     .eq("moderation_status", "approved");
   if (typeof limit === "number") query = query.limit(limit);
   const { data, error } = await query;
+  if (error) throw error;
+  return hydrateProducts(supabase, data ?? []);
+}
+
+export async function getRelated(product: Product, limit = 6): Promise<Product[]> {
+  const supabase = await createSupabaseServerClient();
+  const { data, error } = await supabase
+    .from("products")
+    .select(PRODUCT_COLUMNS)
+    .eq("category", product.category)
+    .neq("id", product.id)
+    .eq("status", "active")
+    .eq("moderation_status", "approved")
+    .limit(limit);
   if (error) throw error;
   return hydrateProducts(supabase, data ?? []);
 }
@@ -275,7 +426,7 @@ export async function getNewArrivals(limit = 8): Promise<Product[]> {
  * exists to draw: ordinary per-user data goes through the anon/session
  * client; aggregate/cross-tenant reads go through here.
  */
-async function loadRecentInteractions(days = 30): Promise<ProductInteraction[]> {
+export async function getRecentInteractions(days = 30): Promise<ProductInteraction[]> {
   const admin = createSupabaseAdminClient();
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
   const { data, error } = await admin
@@ -297,7 +448,7 @@ async function loadRecentInteractions(days = 30): Promise<ProductInteraction[]> 
 }
 
 export async function getTrending(limit = 8): Promise<Product[]> {
-  const [products, events] = await Promise.all([getAllProducts(), loadRecentInteractions()]);
+  const [products, events] = await Promise.all([getAllProducts(), getRecentInteractions()]);
   const scores = computeTrendingScores(events);
   return [...products]
     .sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0))
@@ -305,7 +456,7 @@ export async function getTrending(limit = 8): Promise<Product[]> {
 }
 
 export async function getMostLuvid(limit = 8): Promise<Product[]> {
-  const [products, events] = await Promise.all([getAllProducts(), loadRecentInteractions()]);
+  const [products, events] = await Promise.all([getAllProducts(), getRecentInteractions()]);
   // Same event list as getTrending(), weighted toward "save" only, so mock
   // parity (Trending vs Most LUVI'd reading two different signals) carries
   // over once this is real data instead of the seedPopularity/seedLuviCount
