@@ -84,26 +84,6 @@ function toProduct(row: ProductRow, images: ImageRow[], interests: Interest[], a
   };
 }
 
-async function generateUniqueMerchantSlug(
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  base: string,
-): Promise<string> {
-  const root = slugify(base);
-  let candidate = root;
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const { data, error } = await supabase.from("merchants").select("id").eq("slug", candidate).maybeSingle();
-    if (error) {
-      const category = categorizeSupabaseError(error);
-      console.error("[generateUniqueMerchantSlug] slug lookup failed", { category, ...describeSupabaseError(error) });
-      throw new MerchantWriteError(category, error.message, "PRE_RPC");
-    }
-    if (!data) return candidate;
-    candidate = `${root}-${Math.random().toString(36).slice(2, 6)}`;
-  }
-  // Astronomically unlikely — 20 random collisions in a row — but never loop forever.
-  return `${root}-${crypto.randomUUID().slice(0, 8)}`;
-}
-
 async function generateUniqueProductSlug(
   supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
   merchantId: string,
@@ -212,7 +192,7 @@ function categorizeSupabaseError(error: { code?: string; message: string }): str
  * → merchants/merchant_members/merchant_locations the failure happened on —
  * see createStore()'s call sites for exactly what each stage covers.
  */
-export type CreateStoreStage = "PRE_RPC" | "RPC_EXECUTE" | "RPC_INTERNAL" | "POST_RPC" | "UNEXPECTED";
+export type CreateStoreStage = "RPC_EXECUTE" | "RPC_INTERNAL" | "POST_RPC" | "UNEXPECTED";
 
 /**
  * Thrown by createStore() instead of the raw Supabase/Postgres error so a
@@ -246,11 +226,16 @@ export class MerchantWriteError extends Error {
  * comment — there is no review queue in this phase.
  *
  * Goes through the create_merchant_with_owner RPC (0005_merchant_bootstrap.sql,
- * made SECURITY DEFINER in 0007_merchant_bootstrap_permissions.sql) rather
+ * made SECURITY DEFINER in 0007_merchant_bootstrap_permissions.sql, slug
+ * generation moved server-side in 0008_merchant_slug_bootstrap.sql) rather
  * than three separate inserts: bundling merchants + merchant_members + the
  * optional merchant_locations row into one function call makes them one
  * Postgres transaction, so a failure partway through can never leave an
- * orphaned, unowned merchant row behind.
+ * orphaned, unowned merchant row behind. As of 0008, this function never
+ * touches the `merchants` table itself before calling the RPC — the slug
+ * is derived from p_name INSIDE the SECURITY DEFINER function, with a
+ * concurrency-safe insert-and-retry loop, closing the PRE_RPC permission
+ * gap a plain client-side uniqueness SELECT used to hit.
  *
  * Every exit from this function that isn't a successful Merchant is a
  * thrown MerchantWriteError carrying a sanitized category — including a
@@ -262,10 +247,8 @@ export class MerchantWriteError extends Error {
 export async function createStore(userId: string, input: CreateStoreInput): Promise<Merchant> {
   try {
     const supabase = await createSupabaseServerClient();
-    const slug = await generateUniqueMerchantSlug(supabase, input.name);
 
     const { data: merchantId, error: rpcError } = await supabase.rpc("create_merchant_with_owner", {
-      p_slug: slug,
       p_name: input.name,
       p_logo: input.logo ?? null,
       p_website: input.website || null,

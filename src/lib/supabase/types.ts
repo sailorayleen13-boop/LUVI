@@ -335,7 +335,6 @@ export interface Database {
       };
       create_merchant_with_owner: {
         Args: {
-          p_slug: string;
           p_name: string;
           p_logo: string | null;
           p_website: string | null;
