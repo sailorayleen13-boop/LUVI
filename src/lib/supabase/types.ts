@@ -333,6 +333,20 @@ export interface Database {
         };
         Returns: undefined;
       };
+      create_merchant_with_owner: {
+        Args: {
+          p_slug: string;
+          p_name: string;
+          p_logo: string | null;
+          p_website: string | null;
+          p_whatsapp: string | null;
+          p_instagram: string | null;
+          p_region: string | null;
+          p_city: string | null;
+          p_address_optional: string | null;
+        };
+        Returns: string;
+      };
     };
   };
 }

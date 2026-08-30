@@ -136,57 +136,67 @@ export interface CreateStoreInput {
   logo?: string;
 }
 
+/** name/message/code/details/hint only — never the full error object (it can carry request/response internals), never a key/token/cookie or user-entered field values. */
+function describeSupabaseError(error: { message: string; code?: string; details?: string; hint?: string }) {
+  return { code: error.code, message: error.message, details: error.details, hint: error.hint };
+}
+
 /**
  * Creates the merchant row, its primary location, and the owner membership
- * — as the CURRENT user (userId is always resolved server-side from the
- * session by the calling Server Action, never trusted from a form field).
+ * — as the CURRENT session's user (auth.uid(), read server-side inside the
+ * RPC below; the userId parameter here is unused for authorization, it's
+ * only threaded through for the caller's own bookkeeping/logging).
  * Auto-publishes (status='active', moderation_status='approved'): Phase 8's
  * documented V1 moderation stance — see 0004_merchant_media.sql's header
  * comment — there is no review queue in this phase.
+ *
+ * Goes through the create_merchant_with_owner RPC (0005_merchant_bootstrap.sql)
+ * rather than three separate inserts: bundling merchants + merchant_members
+ * + the optional merchant_locations row into one function call makes them
+ * one Postgres transaction, so a failure partway through can never leave an
+ * orphaned, unowned merchant row behind (see that migration's header for the
+ * bug this replaced). The function is SECURITY INVOKER — it enforces
+ * nothing beyond the RLS policies that already governed each of these
+ * three inserts individually.
  */
 export async function createStore(userId: string, input: CreateStoreInput): Promise<Merchant> {
   const supabase = await createSupabaseServerClient();
   const slug = await generateUniqueMerchantSlug(supabase, input.name);
 
+  const { data: merchantId, error: rpcError } = await supabase.rpc("create_merchant_with_owner", {
+    p_slug: slug,
+    p_name: input.name,
+    p_logo: input.logo ?? null,
+    p_website: input.website || null,
+    p_whatsapp: input.whatsapp || null,
+    p_instagram: input.instagram || null,
+    p_region: input.region || null,
+    p_city: input.city || null,
+    p_address_optional: input.addressOptional || null,
+  });
+  if (rpcError) {
+    console.error("[createStore] create_merchant_with_owner failed", {
+      userId,
+      ...describeSupabaseError(rpcError),
+    });
+    throw rpcError;
+  }
+
   const { data: merchant, error: merchantError } = await supabase
     .from("merchants")
-    .insert({
-      slug,
-      name: input.name,
-      logo: input.logo ?? null,
-      website: input.website || null,
-      whatsapp: input.whatsapp || null,
-      instagram: input.instagram || null,
-      status: "active",
-      moderation_status: "approved",
-    })
     .select("*")
+    .eq("id", merchantId)
     .single();
   if (merchantError) throw merchantError;
 
-  const { error: memberError } = await supabase
-    .from("merchant_members")
-    .insert({ merchant_id: merchant.id, user_id: userId, role: "owner" });
-  if (memberError) throw memberError;
+  const { data: location } = await supabase
+    .from("merchant_locations")
+    .select("*")
+    .eq("merchant_id", merchantId)
+    .eq("is_primary", true)
+    .maybeSingle();
 
-  let location: LocationRow | undefined;
-  if (input.region || input.city || input.addressOptional) {
-    const { data: locationRow, error: locationError } = await supabase
-      .from("merchant_locations")
-      .insert({
-        merchant_id: merchant.id,
-        region: input.region || null,
-        city: input.city || null,
-        address_optional: input.addressOptional || null,
-        is_primary: true,
-      })
-      .select("*")
-      .single();
-    if (locationError) throw locationError;
-    location = locationRow;
-  }
-
-  return toMerchant(merchant, location);
+  return toMerchant(merchant, location ?? undefined);
 }
 
 /** The first store this user is a member of, or null if they aren't a seller yet. Phase 8 V1 assumes one store per seller in the UI (the data model supports more). */

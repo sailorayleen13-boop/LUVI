@@ -127,6 +127,9 @@ export async function createStoreAction(_prevState: ActionResult, formData: Form
       logo: logo || undefined,
     });
   } catch {
+    // createStore() already logs the underlying Supabase/Postgres error
+    // (code/message/details, never secrets or field values) — this is
+    // just the friendly Spanish fallback shown to the seller.
     return { error: "No pudimos crear tu tienda. Intentá de nuevo en un momento." };
   }
 
