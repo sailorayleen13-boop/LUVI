@@ -92,7 +92,11 @@ async function generateUniqueMerchantSlug(
   let candidate = root;
   for (let attempt = 0; attempt < 20; attempt++) {
     const { data, error } = await supabase.from("merchants").select("id").eq("slug", candidate).maybeSingle();
-    if (error) throw error;
+    if (error) {
+      const category = categorizeSupabaseError(error);
+      console.error("[generateUniqueMerchantSlug] slug lookup failed", { category, ...describeSupabaseError(error) });
+      throw new MerchantWriteError(category, error.message);
+    }
     if (!data) return candidate;
     candidate = `${root}-${Math.random().toString(36).slice(2, 6)}`;
   }
@@ -156,14 +160,35 @@ function categorizeSupabaseError(error: { code?: string; message: string }): str
   if (code === "PGRST203") return "RPC_AMBIGUOUS_OVERLOAD";
   if (code.startsWith("PGRST")) return "RPC_UNAVAILABLE_OTHER";
   if (code === "42883") return "RPC_UNDEFINED_FUNCTION";
-  if (code === "42501" || message.includes("permission denied")) return "PERMISSION_DENIED_GRANT";
-  if (message.includes("row-level security")) return "RLS_POLICY_REJECTED";
+  if (code === "42501" || message.includes("permission denied")) return "PERMISSION_DENIED";
+  if (message.includes("row-level security")) return "RLS_DENIED";
   if (code === "23503") return "FOREIGN_KEY_VIOLATION";
   if (code === "23505") return "UNIQUE_VIOLATION";
   if (code === "23502") return "NOT_NULL_VIOLATION";
-  if (code === "22P02") return "INVALID_INPUT_SYNTAX";
+  if (code === "22P02") return "INVALID_INPUT";
+  if (code.startsWith("28")) return "AUTH_SESSION_MISSING";
   if (code.startsWith("42")) return "SQL_SYNTAX_OR_SCHEMA_MISMATCH";
-  return "UNKNOWN";
+  return "UNKNOWN_DB_ERROR";
+}
+
+/**
+ * Thrown by createStore() instead of the raw Supabase/Postgres error so a
+ * safe, sanitized `category` (see categorizeSupabaseError above — never a
+ * message, code, table/column name, or any other DB internals) can ride
+ * along all the way to the Server Action and, from there, the UI. This is a
+ * TEMPORARY diagnostic measure: Vercel Logs isn't retaining/showing
+ * anything for these requests in the current plan, so console.error alone
+ * isn't reaching anyone — surfacing the category in the friendly error
+ * text itself is the only channel left to identify the real failure
+ * without guessing again. Remove once the actual cause is confirmed fixed.
+ */
+export class MerchantWriteError extends Error {
+  category: string;
+  constructor(category: string, message: string) {
+    super(message);
+    this.name = "MerchantWriteError";
+    this.category = category;
+  }
 }
 
 /**
@@ -200,12 +225,18 @@ export async function createStore(userId: string, input: CreateStoreInput): Prom
     p_address_optional: input.addressOptional || null,
   });
   if (rpcError) {
+    const category = categorizeSupabaseError(rpcError);
     console.error("[createStore] create_merchant_with_owner failed", {
       userId,
-      category: categorizeSupabaseError(rpcError),
+      category,
       ...describeSupabaseError(rpcError),
     });
-    throw rpcError;
+    throw new MerchantWriteError(category, rpcError.message);
+  }
+
+  if (!merchantId) {
+    console.error("[createStore] RPC returned no merchant id", { userId });
+    throw new MerchantWriteError("UNKNOWN_DB_ERROR", "create_merchant_with_owner returned no id");
   }
 
   const { data: merchant, error: merchantError } = await supabase
@@ -214,13 +245,14 @@ export async function createStore(userId: string, input: CreateStoreInput): Prom
     .eq("id", merchantId)
     .single();
   if (merchantError) {
+    const category = categorizeSupabaseError(merchantError);
     console.error("[createStore] post-create merchant read-back failed", {
       userId,
       merchantId,
-      category: categorizeSupabaseError(merchantError),
+      category,
       ...describeSupabaseError(merchantError),
     });
-    throw merchantError;
+    throw new MerchantWriteError(category, merchantError.message);
   }
 
   const { data: location } = await supabase
