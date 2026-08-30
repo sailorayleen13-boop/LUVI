@@ -142,6 +142,31 @@ function describeSupabaseError(error: { message: string; code?: string; details?
 }
 
 /**
+ * Turns a raw PostgREST/Postgres error into a stable, greppable category so
+ * a Vercel log line says what's actually wrong instead of requiring someone
+ * to look up an error code. PGRST20x are PostgREST-level ("couldn't even
+ * find/call the function" — usually a stale schema cache or a signature
+ * mismatch); everything else is a real Postgres SQLSTATE from inside the
+ * function body.
+ */
+function categorizeSupabaseError(error: { code?: string; message: string }): string {
+  const code = error.code ?? "";
+  const message = error.message.toLowerCase();
+  if (code === "PGRST202") return "RPC_NOT_FOUND_SCHEMA_CACHE";
+  if (code === "PGRST203") return "RPC_AMBIGUOUS_OVERLOAD";
+  if (code.startsWith("PGRST")) return "RPC_UNAVAILABLE_OTHER";
+  if (code === "42883") return "RPC_UNDEFINED_FUNCTION";
+  if (code === "42501" || message.includes("permission denied")) return "PERMISSION_DENIED_GRANT";
+  if (message.includes("row-level security")) return "RLS_POLICY_REJECTED";
+  if (code === "23503") return "FOREIGN_KEY_VIOLATION";
+  if (code === "23505") return "UNIQUE_VIOLATION";
+  if (code === "23502") return "NOT_NULL_VIOLATION";
+  if (code === "22P02") return "INVALID_INPUT_SYNTAX";
+  if (code.startsWith("42")) return "SQL_SYNTAX_OR_SCHEMA_MISMATCH";
+  return "UNKNOWN";
+}
+
+/**
  * Creates the merchant row, its primary location, and the owner membership
  * — as the CURRENT session's user (auth.uid(), read server-side inside the
  * RPC below; the userId parameter here is unused for authorization, it's
@@ -177,6 +202,7 @@ export async function createStore(userId: string, input: CreateStoreInput): Prom
   if (rpcError) {
     console.error("[createStore] create_merchant_with_owner failed", {
       userId,
+      category: categorizeSupabaseError(rpcError),
       ...describeSupabaseError(rpcError),
     });
     throw rpcError;
@@ -187,7 +213,15 @@ export async function createStore(userId: string, input: CreateStoreInput): Prom
     .select("*")
     .eq("id", merchantId)
     .single();
-  if (merchantError) throw merchantError;
+  if (merchantError) {
+    console.error("[createStore] post-create merchant read-back failed", {
+      userId,
+      merchantId,
+      category: categorizeSupabaseError(merchantError),
+      ...describeSupabaseError(merchantError),
+    });
+    throw merchantError;
+  }
 
   const { data: location } = await supabase
     .from("merchant_locations")
