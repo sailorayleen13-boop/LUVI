@@ -18,7 +18,7 @@ import {
   type ProductInput,
 } from "@/lib/marketplace/supabase/merchant-repository";
 import { CATEGORY_EMOJI } from "@/lib/marketplace/category-visuals";
-import type { Category, MerchantAvailability, Product } from "@/lib/marketplace/types";
+import type { Category, MerchantAvailability } from "@/lib/marketplace/types";
 
 /**
  * The merchant-write Server Action boundary — every mutation a seller can
@@ -228,7 +228,7 @@ export async function createQuickProductAction(_prevState: ActionResult, formDat
   const category = str(formData, "category");
   const imageUrls = formData.getAll("imageUrl").map(String).filter(Boolean);
 
-  let product: Product;
+  let product: { id: string };
   try {
     product = await createProduct(
       merchant.id,

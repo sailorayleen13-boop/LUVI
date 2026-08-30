@@ -40,6 +40,49 @@ export type InteractionTypeRow =
   | "interest";
 export type PreferenceSourceRow = "explicit" | "inferred";
 
+/** Shared shape returned by every product-returning RPC in 0010_owned_merchant_read.sql (get_merchant_products, get_owned_product). */
+export interface MerchantProductRpcRow {
+  id: string;
+  merchant_id: string;
+  slug: string;
+  name: string;
+  description: string;
+  short_description: string;
+  category: string;
+  price: number;
+  original_price: number | null;
+  currency: string;
+  availability: string;
+  is_draft: boolean;
+  status: string;
+  delivery_estimate: string | null;
+  external_purchase_url: string | null;
+  whatsapp_url: string | null;
+  instagram_url: string | null;
+  created_at: string;
+  updated_at: string;
+  images: string[] | null;
+  interests: string[] | null;
+  aesthetics: string[] | null;
+}
+
+/** Shared shape returned by get_owned_merchant and create_merchant_with_owner. */
+export interface MerchantRpcRow {
+  id: string;
+  slug: string;
+  name: string;
+  logo: string | null;
+  description: string;
+  website: string | null;
+  whatsapp: string | null;
+  instagram: string | null;
+  status: MerchantStatusRow;
+  created_at: string;
+  region: string | null;
+  city: string | null;
+  address_optional: string | null;
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -344,21 +387,86 @@ export interface Database {
           p_city: string | null;
           p_address_optional: string | null;
         };
-        Returns: {
-          id: string;
-          slug: string;
-          name: string;
-          logo: string | null;
-          description: string;
-          website: string | null;
-          whatsapp: string | null;
-          instagram: string | null;
-          status: MerchantStatusRow;
-          created_at: string;
-          region: string | null;
-          city: string | null;
-          address_optional: string | null;
-        }[];
+        Returns: MerchantRpcRow[];
+      };
+      get_owned_merchant: {
+        Args: Record<string, never>;
+        Returns: MerchantRpcRow[];
+      };
+      update_owned_merchant: {
+        Args: {
+          p_name: string | null;
+          p_logo: string | null;
+          p_website: string | null;
+          p_whatsapp: string | null;
+          p_instagram: string | null;
+          p_region: string | null;
+          p_city: string | null;
+          p_address_optional: string | null;
+        };
+        Returns: undefined;
+      };
+      get_merchant_products: {
+        Args: { p_merchant_id: string };
+        Returns: MerchantProductRpcRow[];
+      };
+      get_owned_product: {
+        Args: { p_product_id: string };
+        Returns: MerchantProductRpcRow[];
+      };
+      create_merchant_product: {
+        Args: {
+          p_merchant_id: string;
+          p_name: string;
+          p_description: string | null;
+          p_category: string;
+          p_price: number;
+          p_original_price: number | null;
+          p_availability: string;
+          p_delivery_estimate: string | null;
+          p_external_purchase_url: string | null;
+          p_whatsapp_url: string | null;
+          p_instagram_url: string | null;
+          p_is_draft: boolean;
+        };
+        Returns: string;
+      };
+      update_merchant_product: {
+        Args: {
+          p_product_id: string;
+          p_name: string | null;
+          p_description: string | null;
+          p_category: string | null;
+          p_price: number | null;
+          p_original_price: number | null;
+          p_availability: string | null;
+          p_delivery_estimate: string | null;
+          p_external_purchase_url: string | null;
+          p_whatsapp_url: string | null;
+          p_instagram_url: string | null;
+          p_is_draft: boolean | null;
+        };
+        Returns: undefined;
+      };
+      set_product_availability: {
+        Args: { p_product_id: string; p_availability: string };
+        Returns: undefined;
+      };
+      archive_merchant_product: {
+        Args: { p_product_id: string };
+        Returns: undefined;
+      };
+      add_merchant_product_image: {
+        Args: { p_product_id: string; p_url: string; p_position: number };
+        Returns: undefined;
+      };
+      delete_merchant_product_image: {
+        Args: { p_image_id: string };
+        Returns: undefined;
+      };
+      get_merchant_product_images: {
+        Args: { p_product_id: string };
+        Returns: { id: string; url: string; position: number }[];
       };
     };
   };

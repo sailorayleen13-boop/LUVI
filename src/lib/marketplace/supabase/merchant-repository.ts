@@ -1,8 +1,7 @@
 import "server-only";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { slugify } from "@/lib/marketplace/slug";
 import type { Aesthetic, Category, Interest, Merchant, MerchantAvailability, Product } from "@/lib/marketplace/types";
-import type { Database } from "@/lib/supabase/types";
+import type { Database, MerchantProductRpcRow } from "@/lib/supabase/types";
 
 /**
  * The merchant-write side of the data layer — everything a signed-in
@@ -17,8 +16,6 @@ import type { Database } from "@/lib/supabase/types";
  */
 
 type MerchantRow = Database["public"]["Tables"]["merchants"]["Row"];
-type ProductRow = Database["public"]["Tables"]["products"]["Row"];
-type ImageRow = Database["public"]["Tables"]["product_images"]["Row"];
 type LocationRow = Database["public"]["Tables"]["merchant_locations"]["Row"];
 
 /**
@@ -66,58 +63,6 @@ function toMerchant(row: MerchantEssentials, location: LocationEssentials | unde
     status: row.status,
     createdAt: row.created_at,
   };
-}
-
-function toProduct(row: ProductRow, images: ImageRow[], interests: Interest[], aesthetics: Aesthetic[]): OwnedProduct {
-  return {
-    id: row.id,
-    status: row.status,
-    merchantId: row.merchant_id,
-    slug: row.slug,
-    name: row.name,
-    description: row.description,
-    shortDescription: row.short_description,
-    category: row.category as Category,
-    price: Number(row.price),
-    originalPrice: row.original_price === null ? undefined : Number(row.original_price),
-    currency: row.currency,
-    images: images
-      .slice()
-      .sort((a, b) => a.position - b.position)
-      .map((i) => i.url),
-    badges: [],
-    interests,
-    aesthetics,
-    availability: row.availability,
-    isDraft: row.is_draft,
-    deliveryEstimate: row.delivery_estimate ?? undefined,
-    externalPurchaseUrl: row.external_purchase_url ?? undefined,
-    whatsappUrl: row.whatsapp_url ?? undefined,
-    instagramUrl: row.instagram_url ?? undefined,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-async function generateUniqueProductSlug(
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  merchantId: string,
-  base: string,
-): Promise<string> {
-  const root = slugify(base);
-  let candidate = root;
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const { data, error } = await supabase
-      .from("products")
-      .select("id")
-      .eq("merchant_id", merchantId)
-      .eq("slug", candidate)
-      .maybeSingle();
-    if (error) throw error;
-    if (!data) return candidate;
-    candidate = `${root}-${Math.random().toString(36).slice(2, 6)}`;
-  }
-  return `${root}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -321,34 +266,31 @@ export async function createStore(userId: string, input: CreateStoreInput): Prom
   }
 }
 
-/** The first store this user is a member of, or null if they aren't a seller yet. Phase 8 V1 assumes one store per seller in the UI (the data model supports more). */
+/**
+ * The first store this user is a member of, or null if they aren't a
+ * seller yet. Phase 8 V1 assumes one store per seller in the UI (the data
+ * model supports more).
+ *
+ * Goes through the get_owned_merchant RPC (0010_owned_merchant_read.sql)
+ * rather than a plain SELECT: the calling `authenticated` role has been
+ * confirmed (twice — the PRE_RPC and POST_RPC diagnostics fixed in
+ * 0008/0009) to lack the underlying table-level grant on `merchants` this
+ * codebase originally assumed existed, and the same likely applies to
+ * every other owner-scoped table this file touches. The RPC derives the
+ * user from auth.uid() itself — the userId parameter here is unused for
+ * authorization, kept only so call sites read clearly.
+ */
 export async function getOwnedMerchant(userId: string): Promise<Merchant | null> {
+  void userId;
   const supabase = await createSupabaseServerClient();
-  const { data: membership, error: membershipError } = await supabase
-    .from("merchant_members")
-    .select("merchant_id")
-    .eq("user_id", userId)
-    .limit(1)
-    .maybeSingle();
-  if (membershipError) throw membershipError;
-  if (!membership) return null;
-
-  const { data: merchant, error: merchantError } = await supabase
-    .from("merchants")
-    .select("*")
-    .eq("id", membership.merchant_id)
-    .maybeSingle();
-  if (merchantError) throw merchantError;
-  if (!merchant) return null;
-
-  const { data: location } = await supabase
-    .from("merchant_locations")
-    .select("*")
-    .eq("merchant_id", merchant.id)
-    .eq("is_primary", true)
-    .maybeSingle();
-
-  return toMerchant(merchant, location ?? undefined);
+  const { data: rows, error } = await supabase.rpc("get_owned_merchant");
+  if (error) {
+    console.error("[getOwnedMerchant] rpc failed", { category: categorizeSupabaseError(error), ...describeSupabaseError(error) });
+    throw error;
+  }
+  const row = rows?.[0];
+  if (!row) return null;
+  return toMerchant(row, { region: row.region, city: row.city, address_optional: row.address_optional });
 }
 
 export interface UpdateStoreInput {
@@ -362,105 +304,88 @@ export interface UpdateStoreInput {
   logo?: string;
 }
 
+/** Same PERMISSION_MERCHANTS_* gap as getOwnedMerchant() — goes through update_owned_merchant (0010), which derives the target store from auth.uid() itself; merchantId is kept for call-site clarity but unused for authorization. */
 export async function updateStore(merchantId: string, input: UpdateStoreInput): Promise<void> {
+  void merchantId;
   const supabase = await createSupabaseServerClient();
-  const patch: Database["public"]["Tables"]["merchants"]["Update"] = {};
-  if (input.name !== undefined) patch.name = input.name;
-  if (input.whatsapp !== undefined) patch.whatsapp = input.whatsapp || null;
-  if (input.instagram !== undefined) patch.instagram = input.instagram || null;
-  if (input.website !== undefined) patch.website = input.website || null;
-  if (input.logo !== undefined) patch.logo = input.logo || null;
-  if (Object.keys(patch).length > 0) {
-    const { error } = await supabase.from("merchants").update(patch).eq("id", merchantId);
-    if (error) throw error;
-  }
-
-  if (input.region !== undefined || input.city !== undefined || input.addressOptional !== undefined) {
-    const { data: existing } = await supabase
-      .from("merchant_locations")
-      .select("id")
-      .eq("merchant_id", merchantId)
-      .eq("is_primary", true)
-      .maybeSingle();
-    const locationPatch = {
-      region: input.region || null,
-      city: input.city || null,
-      address_optional: input.addressOptional || null,
-    };
-    if (existing) {
-      const { error } = await supabase.from("merchant_locations").update(locationPatch).eq("id", existing.id);
-      if (error) throw error;
-    } else {
-      const { error } = await supabase
-        .from("merchant_locations")
-        .insert({ merchant_id: merchantId, is_primary: true, ...locationPatch });
-      if (error) throw error;
-    }
+  const { error } = await supabase.rpc("update_owned_merchant", {
+    p_name: input.name ?? null,
+    p_logo: input.logo || null,
+    p_website: input.website || null,
+    p_whatsapp: input.whatsapp || null,
+    p_instagram: input.instagram || null,
+    p_region: input.region || null,
+    p_city: input.city || null,
+    p_address_optional: input.addressOptional || null,
+  });
+  if (error) {
+    console.error("[updateStore] rpc failed", { category: categorizeSupabaseError(error), ...describeSupabaseError(error) });
+    throw error;
   }
 }
 
 // ---------------------------------------------------------------------------
-// Products (owner-scoped — includes drafts, relies on RLS for ownership)
+// Products (owner-scoped — includes drafts/archived) — every read/write
+// below goes through a SECURITY DEFINER RPC (0010_owned_merchant_read.sql)
+// rather than a plain table call, for the same reason as getOwnedMerchant/
+// updateStore above: the calling `authenticated` role has been confirmed
+// to lack the underlying table-level grant this codebase assumed existed
+// on `merchants`, and there's no reason to assume products/product_images/
+// merchant_members/merchant_locations are any different — each RPC
+// re-derives the product's owning merchant server-side and checks
+// is_merchant_member()/is_admin() before touching anything, so a
+// productId/merchantId argument can only ever prove "I can't see this",
+// never be used to read or write someone else's data.
 // ---------------------------------------------------------------------------
 
-async function hydrateOwnedProducts(
-  supabase: Awaited<ReturnType<typeof createSupabaseServerClient>>,
-  rows: ProductRow[],
-): Promise<OwnedProduct[]> {
-  if (rows.length === 0) return [];
-  const ids = rows.map((r) => r.id);
-  const [{ data: images }, { data: interestRows }, { data: aestheticRows }] = await Promise.all([
-    supabase.from("product_images").select("*").in("product_id", ids),
-    supabase.from("product_interests").select("product_id, interest").in("product_id", ids),
-    supabase.from("product_aesthetics").select("product_id, aesthetic").in("product_id", ids),
-  ]);
-  const imagesByProduct = new Map<string, ImageRow[]>();
-  for (const row of images ?? []) {
-    const list = imagesByProduct.get(row.product_id) ?? [];
-    list.push(row);
-    imagesByProduct.set(row.product_id, list);
-  }
-  const interestsByProduct = new Map<string, Interest[]>();
-  for (const row of interestRows ?? []) {
-    const list = interestsByProduct.get(row.product_id) ?? [];
-    list.push(row.interest as Interest);
-    interestsByProduct.set(row.product_id, list);
-  }
-  const aestheticsByProduct = new Map<string, Aesthetic[]>();
-  for (const row of aestheticRows ?? []) {
-    const list = aestheticsByProduct.get(row.product_id) ?? [];
-    list.push(row.aesthetic as Aesthetic);
-    aestheticsByProduct.set(row.product_id, list);
-  }
-  return rows.map((r) =>
-    toProduct(
-      r,
-      imagesByProduct.get(r.id) ?? [],
-      interestsByProduct.get(r.id) ?? [],
-      aestheticsByProduct.get(r.id) ?? [],
-    ),
-  );
+function toOwnedProduct(row: MerchantProductRpcRow): OwnedProduct {
+  return {
+    id: row.id,
+    status: row.status as "active" | "archived",
+    merchantId: row.merchant_id,
+    slug: row.slug,
+    name: row.name,
+    description: row.description,
+    shortDescription: row.short_description,
+    category: row.category as Category,
+    price: Number(row.price),
+    originalPrice: row.original_price === null ? undefined : Number(row.original_price),
+    currency: row.currency as "CRC",
+    images: row.images ?? [],
+    badges: [],
+    interests: (row.interests ?? []) as Interest[],
+    aesthetics: (row.aesthetics ?? []) as Aesthetic[],
+    availability: row.availability as MerchantAvailability,
+    isDraft: row.is_draft,
+    deliveryEstimate: row.delivery_estimate ?? undefined,
+    externalPurchaseUrl: row.external_purchase_url ?? undefined,
+    whatsappUrl: row.whatsapp_url ?? undefined,
+    instagramUrl: row.instagram_url ?? undefined,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
 }
 
-/** Every product owned by this merchant, newest first — drafts and archived included (RLS's member branch, not the public branch). */
+/** Every product owned by this merchant, newest first — drafts and archived included (the RPC checks membership on merchantId itself). */
 export async function getMerchantProducts(merchantId: string): Promise<OwnedProduct[]> {
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("products")
-    .select("*")
-    .eq("merchant_id", merchantId)
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return hydrateOwnedProducts(supabase, data ?? []);
+  const { data, error } = await supabase.rpc("get_merchant_products", { p_merchant_id: merchantId });
+  if (error) {
+    console.error("[getMerchantProducts] rpc failed", { category: categorizeSupabaseError(error), ...describeSupabaseError(error) });
+    throw error;
+  }
+  return (data ?? []).map(toOwnedProduct);
 }
 
 export async function getOwnedProductById(productId: string): Promise<OwnedProduct | undefined> {
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.from("products").select("*").eq("id", productId).maybeSingle();
-  if (error) throw error;
-  if (!data) return undefined;
-  const [product] = await hydrateOwnedProducts(supabase, [data]);
-  return product;
+  const { data, error } = await supabase.rpc("get_owned_product", { p_product_id: productId });
+  if (error) {
+    console.error("[getOwnedProductById] rpc failed", { category: categorizeSupabaseError(error), ...describeSupabaseError(error) });
+    throw error;
+  }
+  const row = data?.[0];
+  return row ? toOwnedProduct(row) : undefined;
 }
 
 export interface ProductInput {
@@ -476,39 +401,28 @@ export interface ProductInput {
   instagramUrl?: string;
 }
 
-export async function createProduct(
-  merchantId: string,
-  input: ProductInput,
-  isDraft: boolean,
-): Promise<OwnedProduct> {
+/** Returns just the new product's id — every caller in actions.ts only ever needed that (to build a redirect URL), so this skips a wasted follow-up hydration read. Call getOwnedProductById(id) if the full OwnedProduct is genuinely needed. */
+export async function createProduct(merchantId: string, input: ProductInput, isDraft: boolean): Promise<{ id: string }> {
   const supabase = await createSupabaseServerClient();
-  const slug = await generateUniqueProductSlug(supabase, merchantId, input.name);
-
-  const { data, error } = await supabase
-    .from("products")
-    .insert({
-      merchant_id: merchantId,
-      slug,
-      name: input.name,
-      description: input.description ?? "",
-      short_description: (input.description ?? "").slice(0, 160),
-      category: input.category,
-      price: input.price,
-      original_price: input.originalPrice ?? null,
-      availability: input.availability,
-      delivery_estimate: input.deliveryEstimate || null,
-      external_purchase_url: input.externalPurchaseUrl || null,
-      whatsapp_url: input.whatsappUrl || null,
-      instagram_url: input.instagramUrl || null,
-      moderation_status: "approved",
-      status: "active",
-      is_draft: isDraft,
-    })
-    .select("*")
-    .single();
-  if (error) throw error;
-  const [product] = await hydrateOwnedProducts(supabase, [data]);
-  return product;
+  const { data, error } = await supabase.rpc("create_merchant_product", {
+    p_merchant_id: merchantId,
+    p_name: input.name,
+    p_description: input.description ?? null,
+    p_category: input.category,
+    p_price: input.price,
+    p_original_price: input.originalPrice ?? null,
+    p_availability: input.availability,
+    p_delivery_estimate: input.deliveryEstimate || null,
+    p_external_purchase_url: input.externalPurchaseUrl || null,
+    p_whatsapp_url: input.whatsappUrl || null,
+    p_instagram_url: input.instagramUrl || null,
+    p_is_draft: isDraft,
+  });
+  if (error) {
+    console.error("[createProduct] rpc failed", { category: categorizeSupabaseError(error), ...describeSupabaseError(error) });
+    throw error;
+  }
+  return { id: data as unknown as string };
 }
 
 export async function updateProduct(
@@ -516,36 +430,42 @@ export async function updateProduct(
   input: Partial<ProductInput> & { isDraft?: boolean },
 ): Promise<void> {
   const supabase = await createSupabaseServerClient();
-  const patch: Database["public"]["Tables"]["products"]["Update"] = {};
-  if (input.name !== undefined) patch.name = input.name;
-  if (input.description !== undefined) {
-    patch.description = input.description;
-    patch.short_description = input.description.slice(0, 160);
+  const { error } = await supabase.rpc("update_merchant_product", {
+    p_product_id: productId,
+    p_name: input.name ?? null,
+    p_description: input.description ?? null,
+    p_category: input.category ?? null,
+    p_price: input.price ?? null,
+    p_original_price: input.originalPrice ?? null,
+    p_availability: input.availability ?? null,
+    p_delivery_estimate: input.deliveryEstimate ?? null,
+    p_external_purchase_url: input.externalPurchaseUrl ?? null,
+    p_whatsapp_url: input.whatsappUrl ?? null,
+    p_instagram_url: input.instagramUrl ?? null,
+    p_is_draft: input.isDraft ?? null,
+  });
+  if (error) {
+    console.error("[updateProduct] rpc failed", { category: categorizeSupabaseError(error), ...describeSupabaseError(error) });
+    throw error;
   }
-  if (input.category !== undefined) patch.category = input.category;
-  if (input.price !== undefined) patch.price = input.price;
-  if (input.originalPrice !== undefined) patch.original_price = input.originalPrice ?? null;
-  if (input.availability !== undefined) patch.availability = input.availability;
-  if (input.deliveryEstimate !== undefined) patch.delivery_estimate = input.deliveryEstimate || null;
-  if (input.externalPurchaseUrl !== undefined) patch.external_purchase_url = input.externalPurchaseUrl || null;
-  if (input.whatsappUrl !== undefined) patch.whatsapp_url = input.whatsappUrl || null;
-  if (input.instagramUrl !== undefined) patch.instagram_url = input.instagramUrl || null;
-  if (input.isDraft !== undefined) patch.is_draft = input.isDraft;
-  if (Object.keys(patch).length === 0) return;
-  const { error } = await supabase.from("products").update(patch).eq("id", productId);
-  if (error) throw error;
 }
 
 export async function setProductAvailability(productId: string, availability: MerchantAvailability): Promise<void> {
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("products").update({ availability }).eq("id", productId);
-  if (error) throw error;
+  const { error } = await supabase.rpc("set_product_availability", { p_product_id: productId, p_availability: availability });
+  if (error) {
+    console.error("[setProductAvailability] rpc failed", { category: categorizeSupabaseError(error), ...describeSupabaseError(error) });
+    throw error;
+  }
 }
 
 export async function archiveProduct(productId: string): Promise<void> {
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("products").update({ status: "archived" }).eq("id", productId);
-  if (error) throw error;
+  const { error } = await supabase.rpc("archive_merchant_product", { p_product_id: productId });
+  if (error) {
+    console.error("[archiveProduct] rpc failed", { category: categorizeSupabaseError(error), ...describeSupabaseError(error) });
+    throw error;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -554,23 +474,28 @@ export async function archiveProduct(productId: string): Promise<void> {
 
 export async function addProductImage(productId: string, url: string, position: number): Promise<void> {
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("product_images").insert({ product_id: productId, url, position });
-  if (error) throw error;
+  const { error } = await supabase.rpc("add_merchant_product_image", { p_product_id: productId, p_url: url, p_position: position });
+  if (error) {
+    console.error("[addProductImage] rpc failed", { category: categorizeSupabaseError(error), ...describeSupabaseError(error) });
+    throw error;
+  }
 }
 
 export async function deleteProductImage(imageId: string): Promise<void> {
   const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.from("product_images").delete().eq("id", imageId);
-  if (error) throw error;
+  const { error } = await supabase.rpc("delete_merchant_product_image", { p_image_id: imageId });
+  if (error) {
+    console.error("[deleteProductImage] rpc failed", { category: categorizeSupabaseError(error), ...describeSupabaseError(error) });
+    throw error;
+  }
 }
 
 export async function getProductImages(productId: string): Promise<{ id: string; url: string; position: number }[]> {
   const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase
-    .from("product_images")
-    .select("id, url, position")
-    .eq("product_id", productId)
-    .order("position", { ascending: true });
-  if (error) throw error;
+  const { data, error } = await supabase.rpc("get_merchant_product_images", { p_product_id: productId });
+  if (error) {
+    console.error("[getProductImages] rpc failed", { category: categorizeSupabaseError(error), ...describeSupabaseError(error) });
+    throw error;
+  }
   return data ?? [];
 }
