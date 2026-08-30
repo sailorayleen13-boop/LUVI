@@ -344,7 +344,21 @@ export interface Database {
           p_city: string | null;
           p_address_optional: string | null;
         };
-        Returns: string;
+        Returns: {
+          id: string;
+          slug: string;
+          name: string;
+          logo: string | null;
+          description: string;
+          website: string | null;
+          whatsapp: string | null;
+          instagram: string | null;
+          status: MerchantStatusRow;
+          created_at: string;
+          region: string | null;
+          city: string | null;
+          address_optional: string | null;
+        }[];
       };
     };
   };

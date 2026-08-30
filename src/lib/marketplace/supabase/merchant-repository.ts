@@ -32,7 +32,22 @@ export interface OwnedProduct extends Product {
   status: "active" | "archived";
 }
 
-function toMerchant(row: MerchantRow, location: LocationRow | undefined): Merchant {
+/**
+ * toMerchant() only ever reads these fields, so it accepts any object
+ * shaped like this subset — not just a full MerchantRow/LocationRow. That
+ * lets it map BOTH a real table row (getOwnedMerchant, updateStore) AND
+ * the flattened row create_merchant_with_owner's RPC returns directly
+ * (0009_merchant_bootstrap_return.sql) without fabricating a fake full
+ * LocationRow (id/merchant_id/is_primary/created_at) just to satisfy a
+ * stricter type.
+ */
+type MerchantEssentials = Pick<
+  MerchantRow,
+  "id" | "slug" | "name" | "logo" | "description" | "website" | "whatsapp" | "instagram" | "status" | "created_at"
+>;
+type LocationEssentials = Pick<LocationRow, "region" | "city" | "address_optional">;
+
+function toMerchant(row: MerchantEssentials, location: LocationEssentials | undefined): Merchant {
   return {
     id: row.id,
     slug: row.slug,
@@ -192,7 +207,7 @@ function categorizeSupabaseError(error: { code?: string; message: string }): str
  * → merchants/merchant_members/merchant_locations the failure happened on —
  * see createStore()'s call sites for exactly what each stage covers.
  */
-export type CreateStoreStage = "RPC_EXECUTE" | "RPC_INTERNAL" | "POST_RPC" | "UNEXPECTED";
+export type CreateStoreStage = "RPC_EXECUTE" | "RPC_INTERNAL" | "UNEXPECTED";
 
 /**
  * Thrown by createStore() instead of the raw Supabase/Postgres error so a
@@ -227,15 +242,18 @@ export class MerchantWriteError extends Error {
  *
  * Goes through the create_merchant_with_owner RPC (0005_merchant_bootstrap.sql,
  * made SECURITY DEFINER in 0007_merchant_bootstrap_permissions.sql, slug
- * generation moved server-side in 0008_merchant_slug_bootstrap.sql) rather
- * than three separate inserts: bundling merchants + merchant_members + the
- * optional merchant_locations row into one function call makes them one
- * Postgres transaction, so a failure partway through can never leave an
- * orphaned, unowned merchant row behind. As of 0008, this function never
- * touches the `merchants` table itself before calling the RPC — the slug
- * is derived from p_name INSIDE the SECURITY DEFINER function, with a
- * concurrency-safe insert-and-retry loop, closing the PRE_RPC permission
- * gap a plain client-side uniqueness SELECT used to hit.
+ * generation moved server-side in 0008_merchant_slug_bootstrap.sql, return
+ * shape added in 0009_merchant_bootstrap_return.sql) rather than three
+ * separate inserts: bundling merchants + merchant_members + the optional
+ * merchant_locations row into one function call makes them one Postgres
+ * transaction, so a failure partway through can never leave an orphaned,
+ * unowned merchant row behind. As of 0009, this function makes NO
+ * follow-up read against merchants/merchant_locations after the RPC
+ * returns — the RPC's own result row already carries every field
+ * toMerchant() needs, so there is nothing left for the calling
+ * `authenticated` role to touch under INVOKER privileges at all: the
+ * entire bootstrap, reads included, happens inside the one SECURITY
+ * DEFINER call.
  *
  * Every exit from this function that isn't a successful Merchant is a
  * thrown MerchantWriteError carrying a sanitized category — including a
@@ -248,7 +266,7 @@ export async function createStore(userId: string, input: CreateStoreInput): Prom
   try {
     const supabase = await createSupabaseServerClient();
 
-    const { data: merchantId, error: rpcError } = await supabase.rpc("create_merchant_with_owner", {
+    const { data: rows, error: rpcError } = await supabase.rpc("create_merchant_with_owner", {
       p_name: input.name,
       p_logo: input.logo ?? null,
       p_website: input.website || null,
@@ -277,48 +295,13 @@ export async function createStore(userId: string, input: CreateStoreInput): Prom
       throw new MerchantWriteError(category, rpcError.message, stage);
     }
 
-    if (!merchantId) {
-      console.error("[createStore] RPC returned no merchant id", { userId });
-      throw new MerchantWriteError("UNKNOWN_DB_ERROR", "create_merchant_with_owner returned no id", "RPC_INTERNAL");
+    const row = rows?.[0];
+    if (!row) {
+      console.error("[createStore] RPC returned no row", { userId });
+      throw new MerchantWriteError("UNKNOWN_DB_ERROR", "create_merchant_with_owner returned no row", "RPC_INTERNAL");
     }
 
-    const { data: merchant, error: merchantError } = await supabase
-      .from("merchants")
-      .select("*")
-      .eq("id", merchantId)
-      .single();
-    if (merchantError) {
-      const category = categorizeSupabaseError(merchantError);
-      console.error("[createStore] post-create merchant read-back failed", {
-        userId,
-        merchantId,
-        category,
-        ...describeSupabaseError(merchantError),
-      });
-      throw new MerchantWriteError(category, merchantError.message, "POST_RPC");
-    }
-
-    const { data: location, error: locationError } = await supabase
-      .from("merchant_locations")
-      .select("*")
-      .eq("merchant_id", merchantId)
-      .eq("is_primary", true)
-      .maybeSingle();
-    if (locationError) {
-      // Non-fatal: the merchant + membership already exist and are the
-      // part that actually matters for "store creation succeeded" — a
-      // missing location can be added later from /merchant/settings.
-      // Logged (categorized) rather than thrown so this alone can't turn
-      // an otherwise-successful store creation into a failure.
-      console.error("[createStore] primary location read-back failed, continuing without it", {
-        userId,
-        merchantId,
-        category: categorizeSupabaseError(locationError),
-        ...describeSupabaseError(locationError),
-      });
-    }
-
-    return toMerchant(merchant, location ?? undefined);
+    return toMerchant(row, { region: row.region, city: row.city, address_optional: row.address_optional });
   } catch (err) {
     if (err instanceof MerchantWriteError) throw err;
     // Anything that reaches here didn't come through the normal
