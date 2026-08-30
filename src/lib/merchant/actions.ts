@@ -11,7 +11,6 @@ import {
   deleteProductImage,
   getOwnedMerchant,
   getOwnedProductById,
-  MerchantWriteError,
   setProductAvailability,
   updateProduct,
   updateStore,
@@ -127,16 +126,14 @@ export async function createStoreAction(_prevState: ActionResult, formData: Form
       website: normalizeWebsite(website),
       logo: logo || undefined,
     });
-  } catch (err) {
-    // TEMPORARY diagnostic: console.error alone isn't visible on the
-    // current Vercel plan for these requests, so the only remaining
-    // channel to identify the real failure is the friendly error text
-    // itself. Only a sanitized category ever lands here — never a message,
-    // code, table/column name, or anything else DB-internal — see
-    // MerchantWriteError's docstring in merchant-repository.ts. Remove
-    // this suffix once the real cause is confirmed and fixed.
-    const category = err instanceof MerchantWriteError ? err.category : "UNKNOWN_DB_ERROR";
-    return { error: `No pudimos crear tu tienda. Código de diagnóstico: ${category}` };
+  } catch {
+    // The underlying Postgres/PostgREST error (with a sanitized category —
+    // see MerchantWriteError in merchant-repository.ts) is already logged
+    // server-side by createStore() itself. A brief diagnostic-code suffix
+    // lived here temporarily while tracking down 0007's SECURITY DEFINER
+    // fix (PERMISSION_DENIED); now that the root cause is fixed, this is
+    // back to the plain friendly message — no technical code shown to sellers.
+    return { error: "No pudimos crear tu tienda. Intentá de nuevo en un momento." };
   }
 
   redirect("/merchant/products/new");
