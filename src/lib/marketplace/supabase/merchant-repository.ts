@@ -95,7 +95,7 @@ async function generateUniqueMerchantSlug(
     if (error) {
       const category = categorizeSupabaseError(error);
       console.error("[generateUniqueMerchantSlug] slug lookup failed", { category, ...describeSupabaseError(error) });
-      throw new MerchantWriteError(category, error.message);
+      throw new MerchantWriteError(category, error.message, "PRE_RPC");
     }
     if (!data) return candidate;
     candidate = `${root}-${Math.random().toString(36).slice(2, 6)}`;
@@ -146,12 +146,40 @@ function describeSupabaseError(error: { message: string; code?: string; details?
 }
 
 /**
+ * Postgres's "permission denied for <kind> <name>" message always names the
+ * exact object it rejected — that's plain SQLSTATE-adjacent error text, not
+ * anything user-entered or secret, so it's safe to pattern-match on
+ * server-side to tell "denied to even call the RPC" apart from "denied on
+ * auth.uid()" apart from "denied on merchant_locations", etc. Only the
+ * mapped, fixed category name below is ever allowed to leave this function —
+ * the raw object name is used purely to select which bucket it falls into.
+ */
+const PERMISSION_TARGET_BY_OBJECT: Record<string, string> = {
+  create_merchant_with_owner: "RPC_EXECUTE",
+  auth: "SCHEMA_AUTH",
+  uid: "SCHEMA_AUTH",
+  merchants: "MERCHANTS_INSERT",
+  merchant_members: "MERCHANT_MEMBERS_INSERT",
+  merchant_locations: "MERCHANT_LOCATIONS_INSERT",
+  profiles: "PROFILES_ACCESS",
+};
+
+function refinePermissionTarget(message: string): string {
+  const match = message.match(/permission denied for (?:table|relation|function|schema|sequence|view) ([\w.]+)/i);
+  const object = match?.[1]?.toLowerCase().replace(/^public\./, "").replace(/^auth\./, "");
+  if (!object) return "OTHER";
+  return PERMISSION_TARGET_BY_OBJECT[object] ?? "FUNCTION_INTERNAL";
+}
+
+/**
  * Turns a raw PostgREST/Postgres error into a stable, greppable category so
  * a Vercel log line says what's actually wrong instead of requiring someone
  * to look up an error code. PGRST20x are PostgREST-level ("couldn't even
  * find/call the function" — usually a stale schema cache or a signature
  * mismatch); everything else is a real Postgres SQLSTATE from inside the
- * function body.
+ * function body. Any PERMISSION_DENIED is refined into PERMISSION_<TARGET>
+ * via refinePermissionTarget above, so "denied on what" survives all the
+ * way to the safe category string without ever carrying the raw message.
  */
 function categorizeSupabaseError(error: { code?: string; message: string }): string {
   const code = error.code ?? "";
@@ -166,7 +194,7 @@ function categorizeSupabaseError(error: { code?: string; message: string }): str
   if (code === "PGRST203") return "RPC_AMBIGUOUS_OVERLOAD";
   if (code.startsWith("PGRST")) return "RPC_UNAVAILABLE_OTHER";
   if (code === "42883") return "RPC_UNDEFINED_FUNCTION";
-  if (code === "42501" || message.includes("permission denied")) return "PERMISSION_DENIED";
+  if (code === "42501" || message.includes("permission denied")) return `PERMISSION_${refinePermissionTarget(message)}`;
   if (message.includes("row-level security")) return "RLS_DENIED";
   if (code === "23503") return "FOREIGN_KEY_VIOLATION";
   if (code === "23505") return "UNIQUE_VIOLATION";
@@ -180,22 +208,31 @@ function categorizeSupabaseError(error: { code?: string; message: string }): str
 }
 
 /**
+ * Which leg of createStoreAction → createStore → create_merchant_with_owner
+ * → merchants/merchant_members/merchant_locations the failure happened on —
+ * see createStore()'s call sites for exactly what each stage covers.
+ */
+export type CreateStoreStage = "PRE_RPC" | "RPC_EXECUTE" | "RPC_INTERNAL" | "POST_RPC" | "UNEXPECTED";
+
+/**
  * Thrown by createStore() instead of the raw Supabase/Postgres error so a
- * safe, sanitized `category` (see categorizeSupabaseError above — never a
- * message, code, table/column name, or any other DB internals) can ride
- * along all the way to the Server Action and, from there, the UI. This is a
- * TEMPORARY diagnostic measure: Vercel Logs isn't retaining/showing
- * anything for these requests in the current plan, so console.error alone
- * isn't reaching anyone — surfacing the category in the friendly error
- * text itself is the only channel left to identify the real failure
- * without guessing again. Remove once the actual cause is confirmed fixed.
+ * safe, sanitized `category` + `stage` (never a message, code, table/column
+ * name, or any other DB internals) can ride along all the way to the Server
+ * Action and, from there, the UI. This is a TEMPORARY diagnostic measure:
+ * Vercel Logs isn't retaining/showing anything for these requests in the
+ * current plan, so console.error alone isn't reaching anyone — surfacing
+ * category+stage in the friendly error text itself is the only channel
+ * left to identify the real failure without guessing again. Remove once
+ * the actual cause is confirmed fixed.
  */
 export class MerchantWriteError extends Error {
   category: string;
-  constructor(category: string, message: string) {
+  stage: CreateStoreStage;
+  constructor(category: string, message: string, stage: CreateStoreStage) {
     super(message);
     this.name = "MerchantWriteError";
     this.category = category;
+    this.stage = stage;
   }
 }
 
@@ -240,17 +277,26 @@ export async function createStore(userId: string, input: CreateStoreInput): Prom
     });
     if (rpcError) {
       const category = categorizeSupabaseError(rpcError);
+      // A category of PERMISSION_RPC_EXECUTE means the EXECUTE privilege
+      // check itself failed — the function body never ran at all. Any
+      // other category returned from this same call means EXECUTE
+      // succeeded and something INSIDE the (now SECURITY DEFINER) function
+      // body failed instead — those are two different fixes, so they need
+      // two different stages even though supabase-js reports both the
+      // same way (an error on the .rpc() call).
+      const stage: CreateStoreStage = category === "PERMISSION_RPC_EXECUTE" ? "RPC_EXECUTE" : "RPC_INTERNAL";
       console.error("[createStore] create_merchant_with_owner failed", {
         userId,
         category,
+        stage,
         ...describeSupabaseError(rpcError),
       });
-      throw new MerchantWriteError(category, rpcError.message);
+      throw new MerchantWriteError(category, rpcError.message, stage);
     }
 
     if (!merchantId) {
       console.error("[createStore] RPC returned no merchant id", { userId });
-      throw new MerchantWriteError("UNKNOWN_DB_ERROR", "create_merchant_with_owner returned no id");
+      throw new MerchantWriteError("UNKNOWN_DB_ERROR", "create_merchant_with_owner returned no id", "RPC_INTERNAL");
     }
 
     const { data: merchant, error: merchantError } = await supabase
@@ -266,7 +312,7 @@ export async function createStore(userId: string, input: CreateStoreInput): Prom
         category,
         ...describeSupabaseError(merchantError),
       });
-      throw new MerchantWriteError(category, merchantError.message);
+      throw new MerchantWriteError(category, merchantError.message, "POST_RPC");
     }
 
     const { data: location, error: locationError } = await supabase
@@ -305,7 +351,7 @@ export async function createStore(userId: string, input: CreateStoreInput): Prom
       errorType: err?.constructor?.name,
       message: shape?.message,
     });
-    throw new MerchantWriteError(category, shape?.message ?? "unknown error");
+    throw new MerchantWriteError(category, shape?.message ?? "unknown error", "UNEXPECTED");
   }
 }
 

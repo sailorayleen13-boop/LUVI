@@ -128,16 +128,18 @@ export async function createStoreAction(_prevState: ActionResult, formData: Form
       logo: logo || undefined,
     });
   } catch (err) {
-    // TEMPORARY diagnostic (round 2): 0007's SECURITY DEFINER fix closed
-    // the PERMISSION_DENIED failure, but store creation is still failing
-    // on a DIFFERENT, not-yet-identified error, and Vercel Logs isn't a
-    // reliable channel to read it back on the current plan. Only a
-    // sanitized category ever lands here — never a message, code, table/
-    // column name, user id, or anything else DB-internal — see
-    // MerchantWriteError's docstring in merchant-repository.ts. Revert to
-    // the plain friendly message once this new cause is confirmed fixed.
+    // TEMPORARY diagnostic (round 3): the same PERMISSION_DENIED category
+    // is still coming back even after 0007's SECURITY DEFINER fix, so this
+    // now also surfaces WHICH permission (RPC EXECUTE vs. the auth schema
+    // vs. a specific table) and WHICH leg of the flow it failed on — see
+    // refinePermissionTarget()/CreateStoreStage in merchant-repository.ts.
+    // Only fixed, sanitized category/stage names ever land here — never a
+    // message, code, table/column name, user id, or anything else
+    // DB-internal. Revert to the plain friendly message once the real
+    // cause is confirmed fixed.
     const category = err instanceof MerchantWriteError ? err.category : "UNKNOWN_DB_ERROR";
-    return { error: `No pudimos crear tu tienda. Código de diagnóstico: ${category}` };
+    const stage = err instanceof MerchantWriteError ? err.stage : "UNEXPECTED";
+    return { error: `No pudimos crear tu tienda. Código: ${category} · Etapa: ${stage}` };
   }
 
   redirect("/merchant/products/new");
