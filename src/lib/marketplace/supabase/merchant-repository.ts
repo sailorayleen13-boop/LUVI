@@ -156,6 +156,12 @@ function describeSupabaseError(error: { message: string; code?: string; details?
 function categorizeSupabaseError(error: { code?: string; message: string }): string {
   const code = error.code ?? "";
   const message = error.message.toLowerCase();
+  // Our own explicit `raise exception 'authentication required'` inside
+  // create_merchant_with_owner (0007) has no dedicated SQLSTATE — Postgres
+  // defaults unqualified RAISE EXCEPTION to P0001, which is too generic a
+  // code to key off safely, so this matches on our own known message text
+  // first, before any code-based checks below.
+  if (message.includes("authentication required")) return "AUTH_SESSION_MISSING";
   if (code === "PGRST202") return "RPC_NOT_FOUND_SCHEMA_CACHE";
   if (code === "PGRST203") return "RPC_AMBIGUOUS_OVERLOAD";
   if (code.startsWith("PGRST")) return "RPC_UNAVAILABLE_OTHER";
@@ -167,7 +173,9 @@ function categorizeSupabaseError(error: { code?: string; message: string }): str
   if (code === "23502") return "NOT_NULL_VIOLATION";
   if (code === "22P02") return "INVALID_INPUT";
   if (code.startsWith("28")) return "AUTH_SESSION_MISSING";
+  if (code.startsWith("08")) return "DB_CONNECTION_ERROR";
   if (code.startsWith("42")) return "SQL_SYNTAX_OR_SCHEMA_MISMATCH";
+  if (!code) return "NETWORK_OR_CLIENT_ERROR";
   return "UNKNOWN_DB_ERROR";
 }
 
@@ -200,69 +208,105 @@ export class MerchantWriteError extends Error {
  * documented V1 moderation stance — see 0004_merchant_media.sql's header
  * comment — there is no review queue in this phase.
  *
- * Goes through the create_merchant_with_owner RPC (0005_merchant_bootstrap.sql)
- * rather than three separate inserts: bundling merchants + merchant_members
- * + the optional merchant_locations row into one function call makes them
- * one Postgres transaction, so a failure partway through can never leave an
- * orphaned, unowned merchant row behind (see that migration's header for the
- * bug this replaced). The function is SECURITY INVOKER — it enforces
- * nothing beyond the RLS policies that already governed each of these
- * three inserts individually.
+ * Goes through the create_merchant_with_owner RPC (0005_merchant_bootstrap.sql,
+ * made SECURITY DEFINER in 0007_merchant_bootstrap_permissions.sql) rather
+ * than three separate inserts: bundling merchants + merchant_members + the
+ * optional merchant_locations row into one function call makes them one
+ * Postgres transaction, so a failure partway through can never leave an
+ * orphaned, unowned merchant row behind.
+ *
+ * Every exit from this function that isn't a successful Merchant is a
+ * thrown MerchantWriteError carrying a sanitized category — including a
+ * catch-all around the whole body, so an unexpected thrown value (a raw
+ * network/client error that never reaches the `{ data, error }` shape,
+ * for example) still comes out categorized instead of silently escaping
+ * as a bare, uncategorized Error.
  */
 export async function createStore(userId: string, input: CreateStoreInput): Promise<Merchant> {
-  const supabase = await createSupabaseServerClient();
-  const slug = await generateUniqueMerchantSlug(supabase, input.name);
+  try {
+    const supabase = await createSupabaseServerClient();
+    const slug = await generateUniqueMerchantSlug(supabase, input.name);
 
-  const { data: merchantId, error: rpcError } = await supabase.rpc("create_merchant_with_owner", {
-    p_slug: slug,
-    p_name: input.name,
-    p_logo: input.logo ?? null,
-    p_website: input.website || null,
-    p_whatsapp: input.whatsapp || null,
-    p_instagram: input.instagram || null,
-    p_region: input.region || null,
-    p_city: input.city || null,
-    p_address_optional: input.addressOptional || null,
-  });
-  if (rpcError) {
-    const category = categorizeSupabaseError(rpcError);
-    console.error("[createStore] create_merchant_with_owner failed", {
+    const { data: merchantId, error: rpcError } = await supabase.rpc("create_merchant_with_owner", {
+      p_slug: slug,
+      p_name: input.name,
+      p_logo: input.logo ?? null,
+      p_website: input.website || null,
+      p_whatsapp: input.whatsapp || null,
+      p_instagram: input.instagram || null,
+      p_region: input.region || null,
+      p_city: input.city || null,
+      p_address_optional: input.addressOptional || null,
+    });
+    if (rpcError) {
+      const category = categorizeSupabaseError(rpcError);
+      console.error("[createStore] create_merchant_with_owner failed", {
+        userId,
+        category,
+        ...describeSupabaseError(rpcError),
+      });
+      throw new MerchantWriteError(category, rpcError.message);
+    }
+
+    if (!merchantId) {
+      console.error("[createStore] RPC returned no merchant id", { userId });
+      throw new MerchantWriteError("UNKNOWN_DB_ERROR", "create_merchant_with_owner returned no id");
+    }
+
+    const { data: merchant, error: merchantError } = await supabase
+      .from("merchants")
+      .select("*")
+      .eq("id", merchantId)
+      .single();
+    if (merchantError) {
+      const category = categorizeSupabaseError(merchantError);
+      console.error("[createStore] post-create merchant read-back failed", {
+        userId,
+        merchantId,
+        category,
+        ...describeSupabaseError(merchantError),
+      });
+      throw new MerchantWriteError(category, merchantError.message);
+    }
+
+    const { data: location, error: locationError } = await supabase
+      .from("merchant_locations")
+      .select("*")
+      .eq("merchant_id", merchantId)
+      .eq("is_primary", true)
+      .maybeSingle();
+    if (locationError) {
+      // Non-fatal: the merchant + membership already exist and are the
+      // part that actually matters for "store creation succeeded" — a
+      // missing location can be added later from /merchant/settings.
+      // Logged (categorized) rather than thrown so this alone can't turn
+      // an otherwise-successful store creation into a failure.
+      console.error("[createStore] primary location read-back failed, continuing without it", {
+        userId,
+        merchantId,
+        category: categorizeSupabaseError(locationError),
+        ...describeSupabaseError(locationError),
+      });
+    }
+
+    return toMerchant(merchant, location ?? undefined);
+  } catch (err) {
+    if (err instanceof MerchantWriteError) throw err;
+    // Anything that reaches here didn't come through the normal
+    // { data, error } shape above — e.g. a thrown network/fetch failure,
+    // a timeout, or something else entirely unanticipated. Categorize
+    // best-effort from whatever shape it has, rather than letting an
+    // uncategorized error reach the Server Action.
+    const shape = err as { code?: string; message?: string } | undefined;
+    const category = shape?.message ? categorizeSupabaseError({ code: shape.code, message: shape.message }) : "UNKNOWN_DB_ERROR";
+    console.error("[createStore] unexpected non-Postgrest error", {
       userId,
       category,
-      ...describeSupabaseError(rpcError),
+      errorType: err?.constructor?.name,
+      message: shape?.message,
     });
-    throw new MerchantWriteError(category, rpcError.message);
+    throw new MerchantWriteError(category, shape?.message ?? "unknown error");
   }
-
-  if (!merchantId) {
-    console.error("[createStore] RPC returned no merchant id", { userId });
-    throw new MerchantWriteError("UNKNOWN_DB_ERROR", "create_merchant_with_owner returned no id");
-  }
-
-  const { data: merchant, error: merchantError } = await supabase
-    .from("merchants")
-    .select("*")
-    .eq("id", merchantId)
-    .single();
-  if (merchantError) {
-    const category = categorizeSupabaseError(merchantError);
-    console.error("[createStore] post-create merchant read-back failed", {
-      userId,
-      merchantId,
-      category,
-      ...describeSupabaseError(merchantError),
-    });
-    throw new MerchantWriteError(category, merchantError.message);
-  }
-
-  const { data: location } = await supabase
-    .from("merchant_locations")
-    .select("*")
-    .eq("merchant_id", merchantId)
-    .eq("is_primary", true)
-    .maybeSingle();
-
-  return toMerchant(merchant, location ?? undefined);
 }
 
 /** The first store this user is a member of, or null if they aren't a seller yet. Phase 8 V1 assumes one store per seller in the UI (the data model supports more). */
