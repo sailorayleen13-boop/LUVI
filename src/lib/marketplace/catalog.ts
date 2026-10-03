@@ -26,7 +26,15 @@ import type { Category, Drop, Merchant, Product, ProductInteraction } from "@/li
 async function withMockFallback<T>(load: () => Promise<T>, fallback: () => T): Promise<T> {
   try {
     return await load();
-  } catch {
+  } catch (err) {
+    // This fallback exists for "Supabase isn't configured/reachable" — a
+    // REAL bug (a permission error, a bad query) looks identical from here
+    // unless it's logged, which is exactly how a grant-level 404 on a
+    // genuine seller's store/product went unnoticed in production (see
+    // 0011_public_read_grants.sql's header). Still falls back either way —
+    // this only makes the fallback visible instead of silent.
+    const e = err instanceof Error ? { name: err.name, message: err.message } : { name: typeof err, message: String(err) };
+    console.error("[catalog] falling back to mock data", e);
     return fallback();
   }
 }
